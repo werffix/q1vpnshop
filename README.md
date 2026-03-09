@@ -292,8 +292,8 @@ docker-compose up -d
 
 **Обновить бота до последней версии:**
 
-```bashcurl -sSL https://raw.githubusercontent.com/werffix/q1vpnshop/main/install.sh | sudo bash
-
+```bashcurl 
+-sSL https://raw.githubusercontent.com/werffix/q1vpnshop/main/install.sh | sudo bash
 docker-compose down && docker-compose up
 ```
 
