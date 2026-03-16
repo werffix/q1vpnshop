@@ -1,122 +1,3 @@
-<div align="center" markdown>
-      <h1>3X-ui-ShopBot | Telegram-бот для продажи VPN</h1>
-<p align="center">
-    <a href="https://github.com/tweopi/3xui-shopbot?tab=readme-ov-file#%EF%B8%8F-%D1%83%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B0-%D0%BF%D0%BE%D0%B4-%D0%BA%D0%BB%D1%8E%D1%87">Установка и обновление</a> •
-    <a href="https://github.com/tweopi/3xui-shopbot?tab=readme-ov-file#-%D0%B1%D0%B0%D0%B3%D0%B8-%D0%B8-%D0%BF%D1%80%D0%B5%D0%B4%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B8%D1%8F">Баги и предложения</a> •
-    <a href="#%D0%BF%D0%BE%D0%B4%D0%B4%D0%B5%D1%80%D0%B6%D0%BA%D0%B0-%D0%BF%D0%BE-%D0%BF%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%83">Поддержка по проекту</a> •
-    <a href="https://t.me/+0a2q3H5G7JU4NDMy">Группа для соискателей</a> •
-    <a href="https://github.com/tweopi/3xui-shopbot?tab=readme-ov-file#-%D0%B1%D0%B0%D0%B3%D0%B8-%D0%B8-%D0%BF%D1%80%D0%B5%D0%B4%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B8%D1%8F">Поддержать проект</a>
-</p>
-<p align="center">
-  <img alt="release" src="https://img.shields.io/github/v/release/tweopi/3xui-shopbot?label=release&style=flat-square">
-  <img alt="downloads" src="https://img.shields.io/github/downloads/tweopi/3xui-shopbot/total?label=downloads&style=flat-square">
-  <img alt="license" src="https://img.shields.io/github/license/tweopi/3xui-shopbot?label=license&style=flat-square">
-  <img alt="last-commit" src="https://img.shields.io/github/last-commit/tweopi/3xui-shopbot?label=last%20commit&style=flat-square">
-  <img alt="issues" src="https://img.shields.io/github/issues/tweopi/3xui-shopbot?label=issues&style=flat-square">
-  <img alt="stars" src="https://img.shields.io/github/stars/tweopi/3xui-shopbot?label=stars&style=flat-square">
-  <img alt="python" src="https://img.shields.io/badge/python-%E2%89%A53.10-blue?style=flat-square">
-</p>
-</div>
-
-**3X-ui-ShopBot** — комплексное решение для автоматизированной продажи VLESS‑конфигураций через Telegram с глубокой интеграцией в панель **3x‑ui** и собственной веб‑панелью на базе Tabler.
-
-## [Поддержка по проекту](https://t.me/t_shift_supportbot)
-
-## 👥 Группа для соискателей
-
-Присоединяйтесь к нашей группе: [3xui-shopbot](https://t.me/+0a2q3H5G7JU4NDMy)
-
----
-
-## 🚀 Возможности
-
-- Полная автоматизация: от регистрации до выдачи ключа после оплаты.
-- Веб‑панель «все‑в‑одном»: сервера, тарифы, пользователи, платежи, логи, спидтесты.
-- Мульти‑хост: любое число серверов 3x‑ui, централизованное управление.
-- Гибкие тарифы: месяцы/цена для каждого хоста.
-- Платежи: YooKassa, CryptoBot, Heleket, TON Connect (опционально чеки YooKassa).
-- Принудительная подписка на канал.
-- Тестовый период (trial).
-- Реферальная система (несколько типов начислений).
-- Встроенная поддержка: внешний саппорт‑бот либо контакт пользователя.
-- Тест скорости по хостам: SSH‑speedtest + сетевой Net‑Probe.
-
----
-
-## 🖼️ Скриншоты
-
-<details>
-  <summary><b>Показать скриншоты</b></summary>
-  
-  <br>
-  
-  <table>
-    <tr>
-      <td align="center" valign="top">
-        <a href="docs/screenshots/dashboard.png"><img src="docs/screenshots/dashboard.png" width="480" alt="Dashboard"/></a><br>
-        <sub>Панель — Дашборд</sub>
-      </td>
-      <td align="center" valign="top">
-        <a href="docs/screenshots/settings.png"><img src="docs/screenshots/settings.png" width="480" alt="Settings"/></a><br>
-        <sub>Панель — Настройки</sub>
-      </td>
-    </tr>
-    <tr>
-      <td align="center" valign="top">
-        <a href="docs/screenshots/referrals.png"><img src="docs/screenshots/referrals.png" width="480" alt="Referrals"/></a><br>
-        <sub>Рефералы</sub>
-      </td>
-      <td align="center" valign="top">
-        <a href="docs/screenshots/speedtests.png"><img src="docs/screenshots/speedtests.png" width="480" alt="Speedtests"/></a><br>
-        <sub>Спидтесты</sub>
-      </td>
-    </tr>
-    <tr>
-      <td align="center" valign="top">
-        <a href="docs/screenshots/bot-main-menu.png"><img src="docs/screenshots/bot-main-menu.png" width="360" alt="Bot Main Menu"/></a><br>
-        <sub>Бот — Главное меню</sub>
-      </td>
-      <td align="center" valign="top">
-        <a href="docs/screenshots/bot-admin-menu.png"><img src="docs/screenshots/bot-admin-menu.png" width="360" alt="Bot Admin Menu"/></a><br>
-        <sub>Бот — Админ‑меню</sub>
-      </td>
-    </tr>
-    <tr>
-      <td align="center" valign="top">
-        <a href="docs/screenshots/bot-settings.png"><img src="docs/screenshots/bot-settings.png" width="360" alt="Bot Settings"/></a><br>
-        <sub>Бот — Настройки/Помощь</sub>
-      </td>
-      <td align="center" valign="top">
-        <a href="docs/screenshots/button_design.png"><img src="docs/screenshots/button_design.png" width="480" alt="Button Constructor"/></a><br>
-        <sub>Панель — Конструктор кнопок</sub>
-      </td>
-    </tr>
-    <tr>
-      <td align="center" valign="top">
-        <a href="docs/screenshots/monitor.png"><img src="docs/screenshots/monitor.png" width="480" alt="Monitor"/></a><br>
-        <sub>Панель — Мониторинг</sub>
-      </td>
-      <td align="center" valign="top">
-        <a href="docs/screenshots/preview.png"><img src="docs/screenshots/preview.png" width="360" alt="Preview"/></a><br>
-        <sub>Панель — Предпросмотр меню</sub>
-      </td>
-    </tr>
-  </table>
- 
-  <br>
-  <i>Клик по миниатюре откроет оригинал в полном размере.</i>
-</details>
-
----
-
-## ⚠️ Требования
-
-1) Сервер Ubuntu/Debian с доступом по SSH.
-2) Домен, A‑запись которого уже указывает на IP сервера.
-3) Установленная панель 3x‑ui на одном или нескольких серверах.
-
----
-
 ## 💻 Где купить сервер/домен
 
 Если нет сервера/домена — можно приобрести здесь: [Hostoff](https://hostoff.net/vps?ref=CODEA251D760)
@@ -151,17 +32,6 @@ curl -sSL https://raw.githubusercontent.com/tweopi/3xui-shopbot/main/install.sh 
 
 ---
 
-## ⚙️ Первичная настройка
-
-1) Войдите в панель (`https://your-domain.com/login`) и сразу смените логин/пароль в «Настройки → Настройки панели».
-2) Заполните Telegram‑параметры: `Токен бота`, `Имя телеграмм бота`, `ID администратора в телеграмме`.
-3) Добавьте хост 3x‑ui в «Настройки → Управление хостами» (URL панели, логин/пароль 3x‑ui, inbound id).
-4) Создайте тарифы для добавленного хоста (месяцы/цена).
-5) Сохраните настройки и нажмите «Запустить бота» в шапке панели.
-
-Бот готов к работе.
-
----
 
 ## 💳 Платёжные системы
 
@@ -190,16 +60,6 @@ curl -sSL https://raw.githubusercontent.com/tweopi/3xui-shopbot/main/install.sh 
 
 ---
 
-## 🔗 Принудительная подписка и ссылки
-
-В файле БД настроек заданы ключи (управляются через веб‑панель):
-
-- `force_subscription`: включить/выключить обязательную подписку (`true`/`false`).
-- `channel_url`: ссылка на канал/чат для подписки. Бот должен быть админом канала.
-- `terms_url`, `privacy_url`: ссылки на условия и политику — используются в онбординге.
-
-
----
 
 ## 🧪 Тест скорости (Speedtest)
 
@@ -297,13 +157,3 @@ docker-compose up -d
 docker-compose down && docker-compose up
 ```
 
-## 🙌 Баги и предложения
-
-Если вы нашли баг, или у вас есть предложение, то создавайте "Issue" или присылайте Pull Request'ы. Так же можно со мной связаться [@tweopi](https://t.me/tweopi)
-
-## 💎 Поддержать разработку
-
-**СБП/Карта РФ:** [Нажать чтобы поддержать](https://yookassa.ru/my/i/aJiSmSUeUie5/l)
-**Т-Банк:**[Нажать чтобы поддержать](https://tbank.ru/cf/1JpNWKAFzqR)
-
-## Я ценю любой вклад в развитие проекта ❤️
