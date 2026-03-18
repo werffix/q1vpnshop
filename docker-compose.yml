@@ -3,6 +3,8 @@ services:
     build: .
     command: sh -c "if [ -f src/shop_bot/__main__.py ]; then exec python3 src/shop_bot/__main__.py; elif [ -f shop_bot/__main__.py ]; then exec python3 shop_bot/__main__.py; else exec python3 -m shop_bot.__main__; fi"
     restart: unless-stopped
+        environment:
+      - TZ=Europe/Moscow
     ports:
       - '1488:1488'
     volumes:
