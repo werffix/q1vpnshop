@@ -492,41 +492,15 @@ def create_webhook_app(bot_controller_instance):
     @flask_app.route('/activate/<token>', methods=['GET'])
     def activate_subscription_route(token: str):
         clean_token = (token or "").strip().strip("<>")
-        # Force unified subscription URL to :8443 for Happ crypto generation.
+        # Force unified subscription URL to :8443.
         host_only = (request.host.split(":", 1)[0] or "").strip()
         sub_url = f"https://{host_only}:8443/sub/{clean_token}"
-        happ_crypto_link = None
-        try:
-            payload = json.dumps({"url": sub_url}).encode("utf-8")
-            req = urllib.request.Request(
-                "https://crypto.happ.su/api-v2.php",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                body = (resp.read() or b"").decode("utf-8", errors="ignore").strip()
-            if body.startswith("happ://crypt"):
-                happ_crypto_link = body
-            else:
-                try:
-                    parsed = json.loads(body)
-                except Exception:
-                    parsed = None
-                if isinstance(parsed, str) and parsed.startswith("happ://crypt"):
-                    happ_crypto_link = parsed
-                elif isinstance(parsed, dict):
-                    for key in ("url", "result", "link", "encrypted_url", "data"):
-                        value = parsed.get(key)
-                        if isinstance(value, str) and value.startswith("happ://crypt"):
-                            happ_crypto_link = value
-                            break
-        except Exception as e:
-            logger.warning(f"activate: failed to build happ crypto link: {e}")
-
-        # Strict mode: only official happ://crypt... link, no deeplink fallbacks.
-        open_link = happ_crypto_link or ""
-        launch_variants = [happ_crypto_link] if happ_crypto_link else []
+        deeplink_raw = f"happ://add?url={sub_url}"
+        deeplink_encoded = f"happ://add?url={urllib.parse.quote(sub_url, safe='')}"
+        deeplink_import = f"happ://import?url={urllib.parse.quote(sub_url, safe='')}"
+        deeplink_sub = f"happ://subscription?url={urllib.parse.quote(sub_url, safe='')}"
+        open_link = deeplink_encoded
+        launch_variants = [deeplink_encoded, deeplink_import, deeplink_sub, deeplink_raw]
         html_body = f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -548,15 +522,19 @@ def create_webhook_app(bot_controller_instance):
     <div class="card">
       <h2 style="margin:0 0 10px;">🔗 Активация подписки</h2>
       <div>Если приложение Happ не открылось автоматически, нажмите кнопку ниже:</div>
-      <a class="btn btn-primary" href="{open_link if open_link else '#'}" {"aria-disabled='true'" if not open_link else ""}>Открыть в Happ</a>
-      {"<div style='margin-top:10px;color:#ffb3b3;'>Не удалось получить crypto-ссылку Happ. Попробуйте снова через 5-10 секунд.</div>" if not open_link else ""}
+      <a class="btn btn-primary" href="{open_link}">Открыть в Happ</a>
       <div style="margin-top:10px;">Или используйте вашу subscription ссылку:</div>
       <code>{sub_url}</code>
       <a class="btn btn-soft" href="{sub_url}">Открыть subscription URL</a>
     </div>
   </div>
   <script>
-    const variants = [{json.dumps(launch_variants[0] if len(launch_variants) > 0 else "")}];
+    const variants = [
+      {json.dumps(launch_variants[0])},
+      {json.dumps(launch_variants[1])},
+      {json.dumps(launch_variants[2])},
+      {json.dumps(launch_variants[3])}
+    ];
     let i = 0;
     function tryOpen() {{
       if (i >= variants.length) return;

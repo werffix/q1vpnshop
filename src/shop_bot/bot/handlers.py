@@ -11,7 +11,7 @@ import base64
 import asyncio
 import hashlib
 
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 from hmac import compare_digest
 from functools import wraps
 from yookassa import Payment
@@ -132,55 +132,6 @@ async def _get_connect_subscription_url_from_subscription_1(user_id: int) -> str
     if saved_link:
         return saved_link
     return _get_unified_subscription_url_for_user(user_id)
-
-async def _build_happ_activation_url(subscription_url: str | None) -> str | None:
-    sub = (subscription_url or "").strip()
-    if not sub:
-        return None
-
-    # Normalize payload URL for Happ crypto API to strict format:
-    # https://<host>:8443/sub/<token>
-    payload_url = sub
-    try:
-        parsed = urlparse(sub)
-        token = (parsed.path or "").rstrip("/").split("/")[-1].strip().strip("<>")
-        host = (parsed.hostname or "").strip()
-        if host and token:
-            payload_url = f"https://{host}:8443/sub/{token}"
-    except Exception:
-        payload_url = sub
-
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
-            async with session.post(
-                "https://crypto.happ.su/api-v2.php",
-                data=json.dumps({"url": payload_url}),
-                headers={"Content-Type": "application/json"},
-            ) as resp:
-                body = await resp.text()
-                if resp.status >= 400:
-                    logger.warning(f"Happ crypto-link API HTTP {resp.status}: {body[:180]}")
-                    return None
-                if not body:
-                    return None
-                text = body.strip()
-                if text.startswith("happ://crypt"):
-                    return text
-                try:
-                    data = json.loads(text)
-                except Exception:
-                    data = None
-                if isinstance(data, dict):
-                    for key in ("url", "result", "link", "encrypted_url", "data"):
-                        val = data.get(key)
-                        if isinstance(val, str) and val.strip().startswith("happ://crypt"):
-                            return val.strip()
-                if isinstance(data, str) and data.strip().startswith("happ://crypt"):
-                    return data.strip()
-    except Exception as e:
-        logger.warning(f"Happ crypto-link generation failed: {e}")
-
-    return None
 
 async def _apply_bonus_days_to_user(user_id: int, days: int) -> int:
     if days <= 0:
@@ -2289,7 +2240,6 @@ def get_user_router() -> Router:
     async def howto_android_handler(callback: types.CallbackQuery):
         await callback.answer()
         sub_url = await _get_connect_subscription_url_from_subscription_1(callback.from_user.id) or "https://q1.servernux.com:8443/sub/token"
-        activation_url = await _build_happ_activation_url(sub_url)
         await _safe_edit_or_send(
             callback.message,
             "<b>Подключение на Android</b>\n"
@@ -2297,7 +2247,7 @@ def get_user_router() -> Router:
             "2. Скопируйте ссылку и вставьте в приложение.\n"
             "3. Всё готово! Теперь вы можете выбрать локацию и подключиться!\n\n"
             f"🔗 <b>Subscription URL:</b>\n{html.code(sub_url)}",
-            reply_markup=keyboards.create_platform_download_keyboard("android", sub_url, activation_url),
+            reply_markup=keyboards.create_platform_download_keyboard("android", sub_url),
             disable_web_page_preview=True
         )
 
@@ -2306,7 +2256,6 @@ def get_user_router() -> Router:
     async def howto_ios_handler(callback: types.CallbackQuery):
         await callback.answer()
         sub_url = await _get_connect_subscription_url_from_subscription_1(callback.from_user.id) or "https://q1.servernux.com:8443/sub/token"
-        activation_url = await _build_happ_activation_url(sub_url)
         await _safe_edit_or_send(
             callback.message,
             "<b>Подключение на iOS/MacOS</b>\n"
@@ -2315,7 +2264,7 @@ def get_user_router() -> Router:
             "2. Скопируйте ссылку и вставьте в приложение.\n"
             "3. Всё готово! Теперь вы можете выбрать локацию и подключиться!\n\n"
             f"🔗 <b>Subscription URL:</b>\n{html.code(sub_url)}",
-            reply_markup=keyboards.create_platform_download_keyboard("ios", sub_url, activation_url),
+            reply_markup=keyboards.create_platform_download_keyboard("ios", sub_url),
             disable_web_page_preview=True
         )
 
@@ -2324,7 +2273,6 @@ def get_user_router() -> Router:
     async def howto_windows_handler(callback: types.CallbackQuery):
         await callback.answer()
         sub_url = await _get_connect_subscription_url_from_subscription_1(callback.from_user.id) or "https://q1.servernux.com:8443/sub/token"
-        activation_url = await _build_happ_activation_url(sub_url)
         await _safe_edit_or_send(
             callback.message,
             "<b>Подключение на Windows</b>\n"
@@ -2332,7 +2280,7 @@ def get_user_router() -> Router:
             "2. Скопируйте ссылку и вставьте в приложение.\n"
             "3. Всё готово! Теперь вы можете выбрать локацию и подключиться!\n\n"
             f"🔗 <b>Subscription URL:</b>\n{html.code(sub_url)}",
-            reply_markup=keyboards.create_platform_download_keyboard("windows", sub_url, activation_url),
+            reply_markup=keyboards.create_platform_download_keyboard("windows", sub_url),
             disable_web_page_preview=True
         )
 
@@ -2341,7 +2289,6 @@ def get_user_router() -> Router:
     async def howto_linux_handler(callback: types.CallbackQuery):
         await callback.answer()
         sub_url = await _get_connect_subscription_url_from_subscription_1(callback.from_user.id) or "https://q1.servernux.com:8443/sub/token"
-        activation_url = await _build_happ_activation_url(sub_url)
         await _safe_edit_or_send(
             callback.message,
             "<b>Подключение на Linux</b>\n"
@@ -2349,7 +2296,7 @@ def get_user_router() -> Router:
             "2. Скопируйте ссылку и вставьте в приложение.\n"
             "3. Всё готово! Теперь вы можете выбрать локацию и подключиться!\n\n"
             f"🔗 <b>Subscription URL:</b>\n{html.code(sub_url)}",
-            reply_markup=keyboards.create_platform_download_keyboard("linux", sub_url, activation_url),
+            reply_markup=keyboards.create_platform_download_keyboard("linux", sub_url),
             disable_web_page_preview=True
         )
 

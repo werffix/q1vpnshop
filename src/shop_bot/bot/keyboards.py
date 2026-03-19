@@ -1038,7 +1038,6 @@ def create_referral_keyboard(referral_link: str) -> InlineKeyboardMarkup:
 def create_platform_download_keyboard(
     platform: str,
     subscription_url: str | None = None,
-    activation_url: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     p = (platform or "").lower()
