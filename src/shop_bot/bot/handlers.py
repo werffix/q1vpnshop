@@ -2242,11 +2242,10 @@ def get_user_router() -> Router:
         sub_url = await _get_connect_subscription_url_from_subscription_1(callback.from_user.id) or "https://q1.servernux.com:8443/sub/token"
         await _safe_edit_or_send(
             callback.message,
-            "<b>Подключение на Android</b>\n"
+            "<b>Подключение на Android</b>\n\n"
             "1. Нажмите на «📥 Скачать приложение» и установите приложение.\n"
-            "2. Скопируйте ссылку и вставьте в приложение.\n"
-            "3. Всё готово! Теперь вы можете выбрать локацию и подключиться!\n\n"
-            f"🔗 <b>Subscription URL:</b>\n{html.code(sub_url)}",
+            "2. Нажмите на «🔗 Активировать подписку», чтобы добавить подключение в приложение.\n"
+            "3. Всё готово! Теперь вы можете выбрать локацию и подключиться!",
             reply_markup=keyboards.create_platform_download_keyboard("android", sub_url),
             disable_web_page_preview=True
         )
@@ -2258,12 +2257,11 @@ def get_user_router() -> Router:
         sub_url = await _get_connect_subscription_url_from_subscription_1(callback.from_user.id) or "https://q1.servernux.com:8443/sub/token"
         await _safe_edit_or_send(
             callback.message,
-            "<b>Подключение на iOS/MacOS</b>\n"
+            "<b>Подключение на iOS/MacOS</b>\n\n"
             "1. Нажмите на «📥 Скачать из AppStore Россия» и установите программу.\n"
             "Если первое недоступно — нажмите «📥 Скачать из AppStore Global».\n"
-            "2. Скопируйте ссылку и вставьте в приложение.\n"
-            "3. Всё готово! Теперь вы можете выбрать локацию и подключиться!\n\n"
-            f"🔗 <b>Subscription URL:</b>\n{html.code(sub_url)}",
+            "2. Нажмите на «🔗 Активировать подписку», чтобы добавить подключение в приложение.\n"
+            "3. Всё готово! Теперь вы можете выбрать локацию и подключиться!",
             reply_markup=keyboards.create_platform_download_keyboard("ios", sub_url),
             disable_web_page_preview=True
         )
@@ -2275,11 +2273,10 @@ def get_user_router() -> Router:
         sub_url = await _get_connect_subscription_url_from_subscription_1(callback.from_user.id) or "https://q1.servernux.com:8443/sub/token"
         await _safe_edit_or_send(
             callback.message,
-            "<b>Подключение на Windows</b>\n"
+            "<b>Подключение на Windows</b>\n\n"
             "1. Нажмите на «📥 Скачать программу» и установите программу.\n"
-            "2. Скопируйте ссылку и вставьте в приложение.\n"
-            "3. Всё готово! Теперь вы можете выбрать локацию и подключиться!\n\n"
-            f"🔗 <b>Subscription URL:</b>\n{html.code(sub_url)}",
+            "2. Нажмите на «🔗 Активировать подписку», чтобы добавить подключение в приложение.\n"
+            "3. Всё готово! Теперь вы можете выбрать локацию и подключиться!",
             reply_markup=keyboards.create_platform_download_keyboard("windows", sub_url),
             disable_web_page_preview=True
         )
@@ -2291,11 +2288,10 @@ def get_user_router() -> Router:
         sub_url = await _get_connect_subscription_url_from_subscription_1(callback.from_user.id) or "https://q1.servernux.com:8443/sub/token"
         await _safe_edit_or_send(
             callback.message,
-            "<b>Подключение на Linux</b>\n"
+            "<b>Подключение на Linux</b>\n\n"
             "1. Нажмите на «📥 Скачать программу» и установите программу.\n"
-            "2. Скопируйте ссылку и вставьте в приложение.\n"
-            "3. Всё готово! Теперь вы можете выбрать локацию и подключиться!\n\n"
-            f"🔗 <b>Subscription URL:</b>\n{html.code(sub_url)}",
+            "2. Нажмите на «🔗 Активировать подписку», чтобы добавить подключение в приложение.\n"
+            "3. Всё готово! Теперь вы можете выбрать локацию и подключиться!",
             reply_markup=keyboards.create_platform_download_keyboard("linux", sub_url),
             disable_web_page_preview=True
         )

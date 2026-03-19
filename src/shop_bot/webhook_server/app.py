@@ -623,11 +623,6 @@ def create_webhook_app(bot_controller_instance):
             if not crypto_link
             else ""
         )
-        crypto_preview_html = (
-            f'<div style="margin-top:10px;">Зашифрованная ссылка:</div><code>{escaped_crypto_link}</code>'
-            if crypto_link
-            else ""
-        )
         html_body = f"""<!doctype html>
 <html lang="ru">
 <head>
@@ -635,13 +630,11 @@ def create_webhook_app(bot_controller_instance):
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Активация подписки</title>
   <style>
-    body {{ margin:0; background:#0f1115; color:#eef2f7; font-family: Inter, -apple-system, Segoe UI, Roboto, sans-serif; }}
+    body {{ margin:0; background:#000000; color:#eef2f7; font-family: Inter, -apple-system, Segoe UI, Roboto, sans-serif; }}
     .wrap {{ max-width:560px; margin:10vh auto; padding:20px; }}
-    .card {{ background:#171b22; border:1px solid #2a3342; border-radius:14px; padding:18px; }}
+    .card {{ background:#0a0a0a; border:1px solid #1b1b1b; border-radius:14px; padding:18px; }}
     .btn {{ display:inline-block; margin-top:12px; padding:10px 14px; border-radius:10px; text-decoration:none; font-weight:600; }}
     .btn-primary {{ background:#ffffff; color:#0f1115; }}
-    .btn-soft {{ background:#222a36; color:#e8edf5; border:1px solid #313b4a; }}
-    code {{ display:block; word-break:break-all; margin-top:10px; color:#9ad0ff; }}
   </style>
 </head>
 <body>
@@ -651,10 +644,6 @@ def create_webhook_app(bot_controller_instance):
       {open_hint_html}
       {open_button_html}
       {error_html}
-      <div style="margin-top:10px;">Ваша subscription ссылка:</div>
-      <code>{escaped_sub_url}</code>
-      <a class="btn btn-soft" href="{escaped_sub_url}">Открыть subscription URL</a>
-      {crypto_preview_html}
     </div>
   </div>
   <script>
