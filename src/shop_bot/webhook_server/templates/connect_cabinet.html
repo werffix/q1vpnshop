@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>q1 vpn - Подключение</title>
+  <style>
+    :root{
+      --bg:#0b0f14;
+      --bg2:#0f1621;
+      --card:rgba(255,255,255,0.07);
+      --line:rgba(255,255,255,0.12);
+      --text:#f4f7fb;
+      --muted:#aab4c3;
+      --accent:#ffffff;
+      --shadow:0 12px 40px rgba(0,0,0,0.35);
+      --radius:18px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Arial, sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(800px 500px at 10% -20%, #18283f 0%, transparent 60%),
+        radial-gradient(700px 500px at 110% 0%, #1f1532 0%, transparent 60%),
+        linear-gradient(135deg, var(--bg), var(--bg2));
+      min-height:100vh;
+      padding:20px 14px 40px;
+    }
+    .container{max-width:980px;margin:0 auto}
+    .header{
+      display:flex;align-items:center;justify-content:space-between;
+      padding:14px 16px;margin-bottom:16px;
+      border:1px solid var(--line);
+      background:var(--card);
+      backdrop-filter: blur(14px);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+    }
+    .logo{font-weight:700;letter-spacing:.4px;font-size:24px;color:#fff}
+    .icons{display:flex;gap:10px}
+    .icon-btn{
+      width:42px;height:42px;border-radius:12px;border:1px solid var(--line);
+      background:rgba(255,255,255,.06);color:#fff;text-decoration:none;
+      display:grid;place-items:center;font-size:18px;cursor:pointer;
+    }
+    .grid{display:grid;gap:14px}
+    .card{
+      border:1px solid var(--line);
+      background:var(--card);
+      backdrop-filter: blur(14px);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      padding:18px;
+    }
+    .title{margin:0 0 12px;font-size:18px}
+    .user-grid{
+      display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;
+    }
+    .k{color:var(--muted);font-size:13px}
+    .v{font-size:16px;font-weight:600}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    .btn{
+      border:none;border-radius:12px;padding:12px 14px;font-weight:600;
+      cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;
+      gap:8px;
+    }
+    .btn-white{background:#fff;color:#111}
+    .btn-soft{background:rgba(255,255,255,.08);color:#fff;border:1px solid var(--line)}
+    .select{
+      background:rgba(255,255,255,.08);color:#fff;border:1px solid var(--line);
+      border-radius:12px;padding:11px 12px;min-width:170px;outline:none;
+    }
+    .text{line-height:1.6;color:#d9e1ec}
+    .keys{display:grid;gap:10px}
+    .key{
+      padding:12px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.04);
+      display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;
+    }
+    .mono{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size:12px;color:#c7d0dd;max-width:100%;overflow:auto;
+    }
+    .muted{color:var(--muted)}
+    .qr-modal{
+      position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;place-items:center;z-index:20;padding:20px;
+    }
+    .qr-inner{
+      width:min(420px,100%);padding:18px;border-radius:18px;background:#0d131d;border:1px solid var(--line);
+    }
+    .qr-box{display:grid;place-items:center;padding:10px;border-radius:12px;background:#fff}
+    .qr-box img{max-width:100%;height:auto}
+    @media (max-width:700px){
+      .user-grid{grid-template-columns:1fr}
+      .logo{font-size:22px}
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="logo">q1 vpn</div>
+      <div class="icons">
+        <button id="openSubQr" class="icon-btn" type="button" title="QR подписки">QR</button>
+        <a id="tgSupport" class="icon-btn" href="https://t.me/q1support_bot" target="_blank" rel="noopener" title="Telegram">TG</a>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card">
+        <h2 class="title">Профиль</h2>
+        <div class="user-grid">
+          <div><div class="k">Username</div><div class="v" id="username">—</div></div>
+          <div><div class="k">Статус</div><div class="v" id="status">—</div></div>
+          <div><div class="k">Дата окончания подписки</div><div class="v" id="expires">—</div></div>
+          <div><div class="k">Использованный трафик</div><div class="v" id="traffic">—</div></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2 class="title">Установка</h2>
+        <div class="row" style="margin-bottom:10px">
+          <button class="btn btn-soft" type="button">Happ</button>
+          <select id="deviceSelect" class="select">
+            <option value="ios">iOS</option>
+            <option value="android">Android</option>
+            <option value="macos">macOS</option>
+            <option value="windows">Windows</option>
+            <option value="linux">Linux</option>
+          </select>
+        </div>
+        <div class="text" style="margin-bottom:10px">
+          Откройте страницу в App Store и установите приложение. Запустите его, в окне разрешения VPN-конфигурации нажмите Allow и введите свой пароль.
+        </div>
+        <div class="row">
+          <a class="btn btn-white" href="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973" target="_blank" rel="noopener">App Store (RU)</a>
+          <a class="btn btn-soft" href="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215" target="_blank" rel="noopener">App Store (Global)</a>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2 class="title">Добавление подписки</h2>
+        <div class="text" style="margin-bottom:12px">Нажмите кнопку ниже - приложение откроется, и подписка добавится автоматически.</div>
+        <div class="row">
+          <button id="addSubscriptionBtn" class="btn btn-white" type="button">Добавить подписку</button>
+          <button id="copySubscriptionBtn" class="btn btn-soft" type="button">Скопировать URL</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2 class="title">Подключение и использование</h2>
+        <div class="text">
+          1. Нажмите кнопку включения в приложении.<br />
+          2. Выберите сервер.<br />
+          3. При необходимости смените сервер на более быстрый.
+        </div>
+      </section>
+
+      <section class="card">
+        <h2 class="title">Ключи подключения</h2>
+        <div id="keys" class="keys"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="qr-modal" id="qrModal">
+    <div class="qr-inner">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:10px">
+        <strong>QR код</strong>
+        <button id="closeQrModal" class="btn btn-soft" type="button" style="padding:8px 12px">Закрыть</button>
+      </div>
+      <div class="qr-box"><img id="qrImage" alt="QR" /></div>
+    </div>
+  </div>
+
+  <script>
+    const token = {{ token|tojson }};
+    let state = { subscription_url: "", keys: [] };
+
+    function detectDevice() {
+      const ua = (navigator.userAgent || "").toLowerCase();
+      if (ua.includes("android")) return "android";
+      if (ua.includes("iphone") || ua.includes("ipad") || ua.includes("ipod")) return "ios";
+      if (ua.includes("macintosh")) return "macos";
+      if (ua.includes("win")) return "windows";
+      if (ua.includes("linux")) return "linux";
+      return "ios";
+    }
+
+    function qrUrl(value) {
+      return "https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=" + encodeURIComponent(value || "");
+    }
+
+    async function copyText(value) {
+      try {
+        await navigator.clipboard.writeText(value || "");
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function renderKeys(items) {
+      const box = document.getElementById("keys");
+      if (!Array.isArray(items) || !items.length) {
+        box.innerHTML = '<div class="muted">Ключи не найдены.</div>';
+        return;
+      }
+      box.innerHTML = "";
+      for (const item of items) {
+        const row = document.createElement("div");
+        row.className = "key";
+        const left = document.createElement("div");
+        left.innerHTML =
+          '<div><strong>' + (item.host_name || "Сервер") + '</strong> <span class="muted">(' + (item.used_text || "0 Б") + ' / ' + (item.total_text || "∞") + ')</span></div>' +
+          '<div class="mono">' + (item.vless_url || "") + '</div>';
+        const right = document.createElement("div");
+        right.className = "row";
+        const copyBtn = document.createElement("button");
+        copyBtn.className = "btn btn-soft";
+        copyBtn.type = "button";
+        copyBtn.textContent = "Копировать";
+        copyBtn.onclick = async () => { await copyText(item.vless_url || ""); };
+        const qrBtn = document.createElement("button");
+        qrBtn.className = "btn btn-soft";
+        qrBtn.type = "button";
+        qrBtn.textContent = "QR";
+        qrBtn.onclick = () => openQr(item.vless_url || "");
+        right.appendChild(copyBtn);
+        right.appendChild(qrBtn);
+        row.appendChild(left);
+        row.appendChild(right);
+        box.appendChild(row);
+      }
+    }
+
+    function openQr(value) {
+      const modal = document.getElementById("qrModal");
+      const image = document.getElementById("qrImage");
+      image.src = qrUrl(value);
+      modal.style.display = "grid";
+    }
+
+    async function loadData() {
+      const r = await fetch("/api/connect/" + encodeURIComponent(token), { credentials: "same-origin" });
+      const data = await r.json();
+      if (!data || !data.ok) {
+        document.body.innerHTML = '<div style="padding:28px;color:white;font-family:Inter,sans-serif">Invalid token</div>';
+        return;
+      }
+      state = data;
+      document.getElementById("username").textContent = data.username || "—";
+      document.getElementById("status").textContent = data.status || "—";
+      document.getElementById("expires").textContent = data.expires_at || "—";
+      document.getElementById("traffic").textContent = data.traffic || "—";
+      document.getElementById("tgSupport").href = data.telegram_support_url || "https://t.me/q1support_bot";
+      renderKeys(data.keys || []);
+    }
+
+    function openHappSubscription(subscriptionUrl) {
+      const enc = encodeURIComponent(subscriptionUrl || "");
+      const variants = [
+        "happ://add?url=" + enc,
+        "happ://import?url=" + enc,
+        "happ://subscription?url=" + enc
+      ];
+      for (const url of variants) {
+        try { window.location.href = url; } catch (_) {}
+      }
+    }
+
+    document.getElementById("openSubQr").addEventListener("click", () => openQr(state.subscription_url || ""));
+    document.getElementById("closeQrModal").addEventListener("click", () => {
+      document.getElementById("qrModal").style.display = "none";
+    });
+    document.getElementById("qrModal").addEventListener("click", (e) => {
+      if (e.target && e.target.id === "qrModal") e.currentTarget.style.display = "none";
+    });
+    document.getElementById("copySubscriptionBtn").addEventListener("click", async () => {
+      await copyText(state.subscription_url || "");
+    });
+    document.getElementById("addSubscriptionBtn").addEventListener("click", async () => {
+      if (!state.subscription_url) return;
+      openHappSubscription(state.subscription_url);
+      setTimeout(async () => { await copyText(state.subscription_url); }, 450);
+    });
+
+    document.getElementById("deviceSelect").value = detectDevice();
+    loadData();
+  </script>
+</body>
+</html>
