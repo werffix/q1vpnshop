@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ru" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>q1 vpn - Подключение</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.0.0-beta20/dist/css/tabler.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <style>
+    body.connect-page {
+      min-height: 100vh;
+      background:
+        radial-gradient(1000px 520px at 0% -10%, rgba(39, 56, 94, 0.35), transparent 60%),
+        radial-gradient(900px 560px at 100% 0%, rgba(48, 34, 82, 0.35), transparent 60%),
+        #0f1115;
+    }
+    .connect-wrap { max-width: 760px; margin: 24px auto; }
+    .brand-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+    }
+    .brand-left { display: flex; align-items: center; gap: 12px; }
+    .brand-logo {
+      width: 42px; height: 42px; border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.12);
+      display: grid; place-items: center;
+      background: rgba(255,255,255,0.04);
+      font-weight: 700;
+    }
+    .brand-name { font-size: 1.35rem; font-weight: 700; letter-spacing: .2px; }
+    .top-actions { display: flex; gap: 8px; }
+
+    .profile-head {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+    }
+    .profile-dot {
+      width: 42px; height: 42px; border-radius: 50%;
+      display: grid; place-items: center;
+      background: color-mix(in oklab, var(--success-color) 18%, transparent);
+      border: 1px solid color-mix(in oklab, var(--success-color) 55%, black);
+      color: #d8ffd8;
+    }
+    .profile-title { font-size: 1.2rem; font-weight: 700; }
+    .profile-sub { color: var(--text-muted); font-size: .92rem; }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .metric-item {
+      border-radius: 12px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.03);
+    }
+    .metric-item.user { border-color: rgba(74, 158, 255, 0.35); background: rgba(44, 94, 166, 0.12); }
+    .metric-item.status { border-color: rgba(68, 189, 117, 0.35); background: rgba(34, 112, 67, 0.12); }
+    .metric-item.expire { border-color: rgba(237, 84, 120, 0.35); background: rgba(122, 44, 64, 0.12); }
+    .metric-item.traffic { border-color: rgba(243, 185, 61, 0.35); background: rgba(117, 92, 35, 0.12); }
+    .metric-k { color: var(--text-muted); font-size: .84rem; }
+    .metric-v { font-size: 1.05rem; font-weight: 600; margin-top: 2px; }
+
+    .section-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom: 10px; }
+    .section-title { margin:0; font-size: 1.25rem; font-weight: 700; }
+
+    .client-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .client-tab {
+      padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.03); color: #dfe6f0; font-weight: 600;
+    }
+    .client-tab.active {
+      border-color: #3bc6ff;
+      background: rgba(59, 198, 255, 0.14);
+      box-shadow: 0 0 0 1px rgba(59, 198, 255, 0.2) inset;
+    }
+    .client-tab.disabled { opacity: .45; }
+
+    .inner-block {
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 14px;
+      background: rgba(255,255,255,.02);
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    .inner-title { font-weight: 700; font-size: 1.05rem; margin-bottom: 8px; }
+    .inner-text { color: var(--text-muted); line-height: 1.5; }
+
+    .btn-subscribe {
+      min-width: 210px;
+      background: rgba(59, 198, 255, 0.18) !important;
+      color: #90ecff !important;
+      border-color: rgba(59, 198, 255, 0.45) !important;
+    }
+
+    .qr-modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,.72);
+      display: none; place-items: center; z-index: 1080; padding: 20px;
+    }
+    .qr-inner {
+      width: min(420px, 100%);
+      background: var(--bg-surface);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 14px;
+      padding: 14px;
+    }
+    .qr-box { border-radius: 10px; background: #fff; padding: 10px; display: grid; place-items: center; }
+    .qr-box img { max-width: 100%; height: auto; }
+
+    @media (max-width: 760px) {
+      .connect-wrap { margin: 14px auto; }
+      .metric-grid { grid-template-columns: 1fr; }
+      .btn-subscribe { width: 100%; }
+    }
+  </style>
+</head>
+<body class="connect-page layout-boxed">
+  <div class="container">
+    <div class="connect-wrap">
+      <div class="card glass brand-card">
+        <div class="brand-left">
+          <div class="brand-logo">q1</div>
+          <div class="brand-name">q1 vpn</div>
+        </div>
+        <div class="top-actions">
+          <button id="openSubQr" class="btn btn-sm btn-glass" type="button"><i class="ti ti-qrcode"></i></button>
+          <a id="tgSupport" class="btn btn-sm btn-glass" href="https://t.me/q1support_bot" target="_blank" rel="noopener"><i class="ti ti-brand-telegram"></i></a>
+        </div>
+      </div>
+
+      <div class="card glass mt-3">
+        <div class="profile-head">
+          <div class="profile-dot"><i class="ti ti-check"></i></div>
+          <div>
+            <div class="profile-title" id="usernameTitle">—</div>
+            <div class="profile-sub" id="statusSub">Статус подписки</div>
+          </div>
+        </div>
+        <div class="metric-grid">
+          <div class="metric-item user">
+            <div class="metric-k">Username</div>
+            <div class="metric-v" id="username">—</div>
+          </div>
+          <div class="metric-item status">
+            <div class="metric-k">Статус</div>
+            <div class="metric-v" id="status">—</div>
+          </div>
+          <div class="metric-item expire">
+            <div class="metric-k">Истекает</div>
+            <div class="metric-v" id="expires">—</div>
+          </div>
+          <div class="metric-item traffic">
+            <div class="metric-k">Трафик</div>
+            <div class="metric-v" id="traffic">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card glass mt-3">
+        <div class="section-head">
+          <h2 class="section-title">Установка</h2>
+          <select id="deviceSelect" class="form-select pill-md" style="max-width:160px;">
+            <option value="ios">iOS</option>
+            <option value="android">Android</option>
+            <option value="macos">macOS</option>
+            <option value="windows">Windows</option>
+            <option value="linux">Linux</option>
+          </select>
+        </div>
+
+        <div class="client-tabs">
+          <button class="client-tab active" type="button">Happ</button>
+          <button class="client-tab disabled" type="button" disabled>Stash</button>
+          <button class="client-tab disabled" type="button" disabled>Shadowrocket</button>
+          <button class="client-tab disabled" type="button" disabled>Streisand</button>
+        </div>
+
+        <div class="inner-block">
+          <div class="inner-title">Установка приложения</div>
+          <div class="inner-text mb-3">
+            Откройте страницу в App Store и установите приложение. Запустите его, в окне разрешения VPN-конфигурации нажмите Allow и введите свой пароль.
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <a class="btn btn-sm btn-glass btn-info" href="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973" target="_blank" rel="noopener">
+              <i class="ti ti-external-link"></i> App Store (RU)
+            </a>
+            <a class="btn btn-sm btn-glass btn-info" href="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215" target="_blank" rel="noopener">
+              <i class="ti ti-external-link"></i> App Store (Global)
+            </a>
+          </div>
+        </div>
+
+        <div class="inner-block mb-0">
+          <div class="inner-title">Добавление подписки</div>
+          <div class="inner-text mb-3">Нажмите кнопку ниже — приложение откроется, и подписка добавится автоматически.</div>
+          <div class="d-flex gap-2 flex-wrap">
+            <button id="addSubscriptionBtn" class="btn btn-glass btn-subscribe" type="button">
+              <i class="ti ti-plus"></i> Добавить подписку
+            </button>
+            <button id="copySubscriptionBtn" class="btn btn-sm btn-glass" type="button">Скопировать URL</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card glass mt-3">
+        <h2 class="section-title mb-2">Подключение и использование</h2>
+        <div class="inner-text">
+          1. Нажмите кнопку включения в приложении.<br />
+          2. Выберите сервер.<br />
+          3. При необходимости смените сервер.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="qr-modal" id="qrModal">
+    <div class="qr-inner">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <strong>QR код подписки</strong>
+        <button id="closeQrModal" class="btn btn-sm btn-glass" type="button">Закрыть</button>
+      </div>
+      <div class="qr-box"><img id="qrImage" alt="QR" /></div>
+    </div>
+  </div>
+
+  <script>
+    const token = {{ token|tojson }};
+    let state = { subscription_url: "" };
+
+    function detectDevice() {
+      const ua = (navigator.userAgent || "").toLowerCase();
+      if (ua.includes("android")) return "android";
+      if (ua.includes("iphone") || ua.includes("ipad") || ua.includes("ipod")) return "ios";
+      if (ua.includes("macintosh")) return "macos";
+      if (ua.includes("win")) return "windows";
+      if (ua.includes("linux")) return "linux";
+      return "ios";
+    }
+
+    function qrUrl(value) {
+      return "https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=" + encodeURIComponent(value || "");
+    }
+
+    async function copyText(value) {
+      try {
+        await navigator.clipboard.writeText(value || "");
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function openQr(value) {
+      const modal = document.getElementById("qrModal");
+      const image = document.getElementById("qrImage");
+      image.src = qrUrl(value);
+      modal.style.display = "grid";
+    }
+
+    async function loadData() {
+      const r = await fetch("/api/connect/" + encodeURIComponent(token), { credentials: "same-origin" });
+      const data = await r.json();
+      if (!data || !data.ok) {
+        document.body.innerHTML = '<div style="padding:28px;color:white;">Invalid token</div>';
+        return;
+      }
+      state = data;
+      const username = data.username || "—";
+      const status = data.status || "—";
+      document.getElementById("username").textContent = username;
+      document.getElementById("usernameTitle").textContent = username;
+      document.getElementById("status").textContent = status;
+      document.getElementById("statusSub").textContent = status === "Активна" ? "Подписка активна" : "Подписка неактивна";
+      document.getElementById("expires").textContent = data.expires_at || "—";
+      document.getElementById("traffic").textContent = data.traffic || "—";
+      document.getElementById("tgSupport").href = data.telegram_support_url || "https://t.me/q1support_bot";
+    }
+
+    function openHappSubscription(subscriptionUrl) {
+      const enc = encodeURIComponent(subscriptionUrl || "");
+      const variants = [
+        "happ://add?url=" + enc,
+        "happ://import?url=" + enc,
+        "happ://subscription?url=" + enc
+      ];
+      for (const url of variants) {
+        try { window.location.href = url; } catch (_) {}
+      }
+    }
+
+    document.getElementById("openSubQr").addEventListener("click", () => {
+      const subUrl = state.subscription_url || (window.location.protocol + "//" + window.location.hostname + ":8443/sub/" + token);
+      openQr(subUrl);
+    });
+    document.getElementById("closeQrModal").addEventListener("click", () => {
+      document.getElementById("qrModal").style.display = "none";
+    });
+    document.getElementById("qrModal").addEventListener("click", (e) => {
+      if (e.target && e.target.id === "qrModal") e.currentTarget.style.display = "none";
+    });
+    document.getElementById("copySubscriptionBtn").addEventListener("click", async () => {
+      const subUrl = state.subscription_url || (window.location.protocol + "//" + window.location.hostname + ":8443/sub/" + token);
+      await copyText(subUrl);
+    });
+    document.getElementById("addSubscriptionBtn").addEventListener("click", async () => {
+      const subUrl = state.subscription_url || (window.location.protocol + "//" + window.location.hostname + ":8443/sub/" + token);
+      openHappSubscription(subUrl);
+      setTimeout(async () => { await copyText(subUrl); }, 450);
+    });
+
+    document.getElementById("deviceSelect").value = detectDevice();
+    loadData();
+  </script>
+</body>
+</html>
