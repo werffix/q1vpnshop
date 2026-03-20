@@ -1065,13 +1065,13 @@ def create_platform_download_keyboard(
             text="📥 Скачать программу",
             url="https://github.com/hiddify/hiddify-app/releases/download/v2.0.5/Hiddify-Linux-x64.AppImage"
         )
-    # Activation button must open local activate page first.
+    # Activation button should use redirect endpoint for instant jump to Happ.
     if subscription_url:
         try:
             parsed = urlparse(subscription_url)
             token = (parsed.path or "").rstrip("/").split("/")[-1].strip()
             if token and parsed.scheme and parsed.netloc:
-                activate_url = f"{parsed.scheme}://{parsed.netloc}/activate/{token}"
+                activate_url = f"{parsed.scheme}://{parsed.netloc}/redirect?token={token}"
                 builder.button(
                     text="🔗 Активировать подписку",
                     url=activate_url

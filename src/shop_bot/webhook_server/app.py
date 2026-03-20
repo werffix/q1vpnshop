@@ -180,6 +180,64 @@ def create_webhook_app(bot_controller_instance):
         except Exception:
             return "q1 vpn"
 
+    def _extract_happ_crypto_url(raw_text: str) -> str | None:
+        text = (raw_text or "").strip()
+        if not text:
+            return None
+        if text.startswith("happ://crypt"):
+            return text
+        try:
+            payload = json.loads(text)
+        except Exception:
+            payload = None
+
+        def _scan(value):
+            if isinstance(value, str):
+                v = value.strip()
+                return v if v.startswith("happ://crypt") else None
+            if isinstance(value, dict):
+                for x in value.values():
+                    found = _scan(x)
+                    if found:
+                        return found
+            if isinstance(value, list):
+                for x in value:
+                    found = _scan(x)
+                    if found:
+                        return found
+            return None
+
+        found = _scan(payload) if payload is not None else None
+        if found:
+            return found
+        m = re.search(r"(happ://crypt[^\s\"'<>]+)", text)
+        return m.group(1).strip() if m else None
+
+    def _request_happ_crypto_url(sub_url: str, timeout_sec: float = 10.0) -> tuple[str | None, str | None]:
+        endpoint = "https://crypto.happ.su/api-v2.php"
+        body = json.dumps({"url": sub_url}, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            endpoint,
+            data=body,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/plain, */*",
+                "User-Agent": "curl/8.5.0",
+                "Origin": "https://www.happ.su",
+                "Referer": "https://www.happ.su/",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+                raw = resp.read().decode("utf-8", errors="ignore")
+        except Exception as e:
+            return None, f"request_failed: {e}"
+        link = _extract_happ_crypto_url(raw)
+        if not link:
+            return None, "invalid_or_empty_response"
+        return link, None
+
     def _ensure_clients_on_all_hosts(user_id: int, keys: list[dict]) -> list[dict]:
         """Create missing clients for user on every configured host before sub build."""
         try:
@@ -489,66 +547,25 @@ def create_webhook_app(bot_controller_instance):
     def unified_subscription_route_legacy(token: str):
         return _serve_unified_subscription(token)
 
+    @flask_app.route('/redirect', methods=['GET'])
+    def happ_redirect_route():
+        direct_to = (request.args.get("to") or "").strip()
+        if direct_to.startswith("happ://"):
+            return redirect(direct_to, code=302)
+
+        token = (request.args.get("token") or "").strip().strip("<>")
+        if not token:
+            return Response("Missing token", status=400, mimetype="text/plain")
+
+        sub_url = f"https://q1.servernux.com:8443/sub/{token}"
+        crypto_link, error = _request_happ_crypto_url(sub_url)
+        if not crypto_link:
+            logger.warning(f"redirect: failed to build happ crypto link: {error}")
+            return redirect(url_for("activate_subscription_route", token=token), code=302)
+        return redirect(crypto_link, code=302)
+
     @flask_app.route('/activate/<token>', methods=['GET'])
     def activate_subscription_route(token: str):
-        def _extract_happ_crypto_url(raw_text: str) -> str | None:
-            text = (raw_text or "").strip()
-            if not text:
-                return None
-            if text.startswith("happ://crypt"):
-                return text
-            try:
-                payload = json.loads(text)
-            except Exception:
-                payload = None
-
-            def _scan(value):
-                if isinstance(value, str):
-                    v = value.strip()
-                    return v if v.startswith("happ://crypt") else None
-                if isinstance(value, dict):
-                    for x in value.values():
-                        found = _scan(x)
-                        if found:
-                            return found
-                if isinstance(value, list):
-                    for x in value:
-                        found = _scan(x)
-                        if found:
-                            return found
-                return None
-
-            found = _scan(payload) if payload is not None else None
-            if found:
-                return found
-            m = re.search(r"(happ://crypt[^\s\"'<>]+)", text)
-            return m.group(1).strip() if m else None
-
-        def _request_happ_crypto_url(sub_url: str, timeout_sec: float = 10.0) -> tuple[str | None, str | None]:
-            endpoint = "https://crypto.happ.su/api-v2.php"
-            body = json.dumps({"url": sub_url}, ensure_ascii=False).encode("utf-8")
-            req = urllib.request.Request(
-                endpoint,
-                data=body,
-                method="POST",
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json, text/plain, */*",
-                    "User-Agent": "curl/8.5.0",
-                    "Origin": "https://www.happ.su",
-                    "Referer": "https://www.happ.su/",
-                },
-            )
-            try:
-                with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
-                    raw = resp.read().decode("utf-8", errors="ignore")
-            except Exception as e:
-                return None, f"request_failed: {e}"
-            link = _extract_happ_crypto_url(raw)
-            if not link:
-                return None, "invalid_or_empty_response"
-            return link, None
-
         clean_token = (token or "").strip().strip("<>")
         sub_url = f"https://q1.servernux.com:8443/sub/{clean_token}"
         crypto_link, error = _request_happ_crypto_url(sub_url)
