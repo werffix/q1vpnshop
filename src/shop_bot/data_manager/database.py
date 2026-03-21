@@ -1542,6 +1542,10 @@ def get_admin_stats() -> dict:
         "today_new_users": 0,
         "today_income": 0.0,
         "today_issued_keys": 0,
+        # current month metrics
+        "month_new_users": 0,
+        "month_income": 0.0,
+        "month_issued_keys": 0,
     }
     try:
         with sqlite3.connect(DB_FILE) as conn:
@@ -1595,6 +1599,41 @@ def get_admin_stats() -> dict:
             )
             row = cursor.fetchone()
             stats["today_issued_keys"] = (row[0] or 0) if row else 0
+
+            # current month new users
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM users
+                WHERE strftime('%Y-%m', registration_date) = strftime('%Y-%m', 'now')
+                """
+            )
+            row = cursor.fetchone()
+            stats["month_new_users"] = (row[0] or 0) if row else 0
+
+            # current month income
+            cursor.execute(
+                """
+                SELECT COALESCE(SUM(amount_rub), 0)
+                FROM transactions
+                WHERE status IN ('paid','success','succeeded')
+                  AND LOWER(COALESCE(payment_method, '')) <> 'balance'
+                  AND strftime('%Y-%m', created_date) = strftime('%Y-%m', 'now')
+                """
+            )
+            row = cursor.fetchone()
+            stats["month_income"] = float(row[0] or 0.0) if row else 0.0
+
+            # current month issued subscriptions (unique users)
+            cursor.execute(
+                """
+                SELECT COUNT(DISTINCT user_id)
+                FROM vpn_keys
+                WHERE strftime('%Y-%m', created_date) = strftime('%Y-%m', 'now')
+                """
+            )
+            row = cursor.fetchone()
+            stats["month_issued_keys"] = (row[0] or 0) if row else 0
     except sqlite3.Error as e:
         logging.error(f"Не удалось получить статистику администратора: {e}")
     return stats

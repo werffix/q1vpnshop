@@ -90,6 +90,7 @@ async def _safe_edit_or_send(
     )
 
 class Broadcast(StatesGroup):
+    waiting_for_audience = State()
     waiting_for_message = State()
     waiting_for_button_option = State()
     waiting_for_button_text = State()
@@ -160,6 +161,31 @@ def get_admin_router() -> Router:
             return int(total_gb_like)
         return int(total_gb_like * (1024 ** 3))
 
+    def _is_client_online(client_obj) -> bool:
+        direct_flags = (
+            _obj_get(client_obj, "online"),
+            _obj_get(client_obj, "is_online"),
+            _obj_get(client_obj, "isOnline"),
+        )
+        for flag in direct_flags:
+            if isinstance(flag, bool):
+                return flag
+            if isinstance(flag, (int, float)) and int(flag) > 0:
+                return True
+            if isinstance(flag, str) and flag.strip().lower() in {"1", "true", "online", "yes"}:
+                return True
+
+        for key in ("ip_count", "ipCount", "current_ip", "currentIp", "online_ip_count"):
+            value = _obj_get(client_obj, key)
+            try:
+                if int(value or 0) > 0:
+                    return True
+            except Exception:
+                continue
+
+        status = str(_obj_get(client_obj, "status") or "").strip().lower()
+        return status == "online"
+
     def _get_host_total_traffic_sync(host_data: dict) -> dict:
         host_name = str((host_data or {}).get("host_name") or "—").strip() or "—"
         try:
@@ -179,8 +205,7 @@ def get_admin_router() -> Router:
 
             clients = (_obj_get(_obj_get(full_inbound, "settings"), "clients") or [])
             used_total = 0
-            quota_total = 0
-            has_quota = False
+            online_count = 0
             for client in clients:
                 up = max(
                     _to_int(_obj_get(client, "up"))
@@ -196,15 +221,17 @@ def get_admin_router() -> Router:
                 )
                 total = _extract_total_bytes(client)
                 used_total += up + down
+                if _is_client_online(client):
+                    online_count += 1
                 if total > 0:
-                    quota_total += total
-                    has_quota = True
+                    # Touch the field so that used traffic is taken from direct inbound stats.
+                    pass
 
             return {
                 "host_name": host_name,
                 "ok": True,
                 "used": max(used_total, 0),
-                "total": max(quota_total, 0) if has_quota else 0,
+                "online": max(online_count, 0),
             }
         except Exception:
             return {"host_name": host_name, "ok": False}
@@ -235,6 +262,9 @@ def get_admin_router() -> Router:
         today_new = stats.get('today_new_users', 0)
         today_income = float(stats.get('today_income', 0) or 0)
         today_keys = stats.get('today_issued_keys', 0)
+        month_new = stats.get('month_new_users', 0)
+        month_income = float(stats.get('month_income', 0) or 0)
+        month_keys = stats.get('month_issued_keys', 0)
         total_users = stats.get('total_users', 0)
         total_income = float(stats.get('total_income', 0) or 0)
         total_keys = stats.get('total_keys', 0)
@@ -253,9 +283,8 @@ def get_admin_router() -> Router:
                 traffic_lines.append(f"{prefix} {host_name}: Недоступно")
                 continue
             used = int(result.get("used") or 0)
-            total = int(result.get("total") or 0)
-            total_text = _format_traffic(total) if total > 0 else "∞"
-            traffic_lines.append(f"{prefix} {host_name}: {_format_traffic(used)} / {total_text}")
+            online = int(result.get("online") or 0)
+            traffic_lines.append(f"{prefix} {host_name} (онлайн: {online}): {_format_traffic(used)}")
         traffic_block = (
             "🌐 <b>Использование трафика (общее):</b>\n" + "\n".join(traffic_lines)
             if traffic_lines
@@ -268,6 +297,10 @@ def get_admin_router() -> Router:
             f"👥 Новых пользователей: {today_new}\n"
             f"💰 Доход: {today_income:.2f} RUB\n"
             f"🔑 Выдано подписок: {today_keys}\n\n"
+            "<b>За месяц:</b>\n"
+            f"👥 Новых пользователей: {month_new}\n"
+            f"💰 Доход: {month_income:.2f} RUB\n"
+            f"🔑 Выдано подписок: {month_keys}\n\n"
             "<b>За все время:</b>\n"
             f"👥 Всего пользователей: {total_users}\n"
             f"💰 Общий доход: {total_income:.2f} RUB\n"
@@ -2759,10 +2792,31 @@ def get_admin_router() -> Router:
             await callback.answer("У вас нет прав.", show_alert=True)
             return
         await callback.answer()
-        await _safe_edit_or_send(callback.message, 
-            "Пришлите сообщение, которое вы хотите разослать всем пользователям.\n"
-            "Вы можете использовать форматирование (<b>жирный</b>, <i>курсив</i>).\n"
-            "Также поддерживаются фото, видео и документы.\n",
+        await _safe_edit_or_send(
+            callback.message,
+            "Выберите аудиторию для рассылки:",
+            reply_markup=keyboards.create_broadcast_audience_keyboard()
+        )
+        await state.set_state(Broadcast.waiting_for_audience)
+
+    @admin_router.callback_query(Broadcast.waiting_for_audience, F.data.startswith("broadcast_audience_"))
+    async def broadcast_audience_selected_handler(callback: types.CallbackQuery, state: FSMContext):
+        await callback.answer()
+        audience = callback.data.replace("broadcast_audience_", "", 1)
+        audience_titles = {
+            "all": "Все пользователи",
+            "active": "С активной подпиской",
+            "no_active": "Без активной подписки",
+            "never_bought": "Никогда не покупали",
+            "has_subscription": "Подписка",
+        }
+        await state.update_data(broadcast_audience=audience)
+        await _safe_edit_or_send(
+            callback.message,
+            "Аудитория выбрана: "
+            f"<b>{audience_titles.get(audience, 'Все пользователи')}</b>\n\n"
+            "Пришлите сообщение, которое вы хотите разослать.\n"
+            "Поддерживаются текст, фото, видео и документы.",
             reply_markup=keyboards.create_broadcast_cancel_keyboard()
         )
         await state.set_state(Broadcast.waiting_for_message)
@@ -2860,7 +2914,41 @@ def get_admin_router() -> Router:
         await state.clear()
 
         users = get_all_users()
-        logger.info(f"Broadcast: Starting to iterate over {len(users)} users.")
+        audience = data.get("broadcast_audience") or "all"
+        all_keys = database.get_all_keys() or []
+        now = datetime.now()
+        active_user_ids = set()
+        users_with_any_subscription = set()
+        for key in all_keys:
+            uid = key.get("user_id")
+            if uid is None:
+                continue
+            try:
+                uid = int(uid)
+            except Exception:
+                continue
+            users_with_any_subscription.add(uid)
+            try:
+                expiry = datetime.fromisoformat(str(key.get("expiry_date")))
+                if expiry > now:
+                    active_user_ids.add(uid)
+            except Exception:
+                continue
+
+        def _match_audience(user_row: dict) -> bool:
+            uid = int(user_row.get("telegram_id") or 0)
+            if audience == "active":
+                return uid in active_user_ids
+            if audience == "no_active":
+                return uid in users_with_any_subscription and uid not in active_user_ids
+            if audience == "never_bought":
+                return uid not in users_with_any_subscription
+            if audience == "has_subscription":
+                return uid in users_with_any_subscription
+            return True
+
+        users = [u for u in users if _match_audience(u)]
+        logger.info(f"Broadcast: Starting to iterate over {len(users)} users for audience='{audience}'.")
 
         sent_count = 0
         failed_count = 0

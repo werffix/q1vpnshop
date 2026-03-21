@@ -399,25 +399,11 @@ def create_main_menu_keyboard(
     return builder.as_markup()
 
 def create_admin_menu_keyboard() -> InlineKeyboardMarkup:
-    # Try DB-driven keyboard first
-    kb = _build_keyboard_from_db('admin_menu')
-    if kb:
-        return kb
-
-    # Fallback hardcoded
     builder = InlineKeyboardBuilder()
-    builder.button(text="👥 Пользователи", callback_data="admin_users")
-    builder.button(text="🌍 Ключи на хосте", callback_data="admin_host_keys")
-    builder.button(text="🎁 Выдать ключ", callback_data="admin_gift_key")
-    builder.button(text="⚡ Тест скорости", callback_data="admin_speedtest")
-    builder.button(text="📊 Мониторинг", callback_data="admin_monitor")
-    builder.button(text="🗄 Бэкап БД", callback_data="admin_backup_db")
-    builder.button(text="♻️ Восстановить БД", callback_data="admin_restore_db")
-    builder.button(text="👮 Администраторы", callback_data="admin_admins_menu")
-    builder.button(text="🎟 Промокоды", callback_data="admin_promo_menu")
+    builder.button(text="🌐 Веб-панель", url="https://q1.servernux.com:8443/")
     builder.button(text="📢 Рассылка", callback_data="start_broadcast")
     builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
-    builder.adjust(2, 2, 2, 2, 1, 1, 1)
+    builder.adjust(1)
     return builder.as_markup()
 
 def create_admins_menu_keyboard() -> InlineKeyboardMarkup:
@@ -534,6 +520,17 @@ def create_broadcast_options_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="➡️ Пропустить", callback_data="broadcast_skip_button")
     builder.button(text="❌ Отмена", callback_data="cancel_broadcast")
     builder.adjust(2, 1)
+    return builder.as_markup()
+
+def create_broadcast_audience_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Все пользователи", callback_data="broadcast_audience_all")
+    builder.button(text="С активной подпиской", callback_data="broadcast_audience_active")
+    builder.button(text="Без активной подписки", callback_data="broadcast_audience_no_active")
+    builder.button(text="Никогда не покупали", callback_data="broadcast_audience_never_bought")
+    builder.button(text="Подписка", callback_data="broadcast_audience_has_subscription")
+    builder.button(text="❌ Отмена", callback_data="cancel_broadcast")
+    builder.adjust(1)
     return builder.as_markup()
 
 def create_broadcast_confirmation_keyboard() -> InlineKeyboardMarkup:

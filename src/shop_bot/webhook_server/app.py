@@ -10,7 +10,7 @@ import time
 import uuid
 import re
 from hmac import compare_digest
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 from math import ceil
 from flask import Flask, request, render_template, redirect, url_for, flash, session, current_app, jsonify, send_file, Response
@@ -1963,6 +1963,7 @@ def create_webhook_app(bot_controller_instance):
         current_settings = get_all_settings()
         hosts = get_all_hosts()
         plans = get_all_plans()
+        promos = database.list_promo_codes(include_inactive=True) or []
         for host in hosts:
             host['plans'] = get_plans_for_host(host['host_name'])
             # добавить последний результат спидтеста в карточку
@@ -1990,7 +1991,61 @@ def create_webhook_app(bot_controller_instance):
             backups = []
 
         common_data = get_common_template_data()
-        return render_template('settings.html', settings=current_settings, hosts=hosts, plans=plans, backups=backups, **common_data)
+        return render_template('settings.html', settings=current_settings, hosts=hosts, plans=plans, promos=promos, backups=backups, **common_data)
+
+    @flask_app.route('/settings/promo/create', methods=['POST'])
+    @login_required
+    def settings_create_promo_route():
+        try:
+            code = (request.form.get('code') or '').strip().upper()
+            discount_mode = (request.form.get('discount_mode') or 'percent').strip()
+            discount_value_raw = (request.form.get('discount_value') or '').strip()
+            description = (request.form.get('description') or '').strip() or None
+            valid_days_raw = (request.form.get('valid_days') or '').strip()
+            usage_limit_total_raw = (request.form.get('usage_limit_total') or '').strip()
+            usage_limit_per_user_raw = (request.form.get('usage_limit_per_user') or '').strip()
+
+            if not code:
+                flash('Укажите код промокода.', 'danger')
+                return redirect(url_for('settings_page', tab='plans'))
+
+            try:
+                discount_value = float(discount_value_raw)
+            except Exception:
+                flash('Укажите корректное значение скидки.', 'danger')
+                return redirect(url_for('settings_page', tab='plans'))
+
+            discount_percent = None
+            discount_amount = None
+            if discount_mode == 'amount':
+                discount_amount = discount_value
+            else:
+                discount_percent = discount_value
+
+            valid_until = None
+            if valid_days_raw:
+                valid_until = datetime.now() + timedelta(days=max(1, int(valid_days_raw)))
+
+            usage_limit_total = int(usage_limit_total_raw) if usage_limit_total_raw else None
+            usage_limit_per_user = int(usage_limit_per_user_raw) if usage_limit_per_user_raw else None
+
+            ok = database.create_promo_code(
+                code,
+                discount_percent=discount_percent,
+                discount_amount=discount_amount,
+                usage_limit_total=usage_limit_total,
+                usage_limit_per_user=usage_limit_per_user,
+                valid_until=valid_until,
+                description=description,
+            )
+            if ok:
+                flash(f'Промокод {code} создан.', 'success')
+            else:
+                flash('Не удалось создать промокод. Возможно, такой код уже существует.', 'danger')
+        except Exception as e:
+            logger.error(f"Ошибка создания промокода из настроек: {e}", exc_info=True)
+            flash('Ошибка при создании промокода.', 'danger')
+        return redirect(url_for('settings_page', tab='plans'))
 
     # --- DB Backup/Restore ---
     @flask_app.route('/admin/db/backup', methods=['POST'])

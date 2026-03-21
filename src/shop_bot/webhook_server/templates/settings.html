@@ -62,6 +62,17 @@
   /* Небольшой отступ сверху для текста под селектом на узких экранах */
   @media (max-width: 767.98px){
     #backup-date.badge { margin-top: 6px; }
+    .nav.nav-pills { flex-wrap: nowrap; overflow-x: auto; gap: 8px; padding-bottom: 4px; }
+    .nav.nav-pills .nav-link { white-space: nowrap; }
+    .host-card .form-inline,
+    .plan-edit form,
+    #plans .form-inline { flex-direction: column; align-items: stretch !important; }
+    .host-card .form-inline .btn,
+    .plan-edit form .btn,
+    #plans .form-inline .btn,
+    .host-header .btn { width: 100%; }
+    .host-header .d-flex { width: 100%; flex-direction: column; }
+    .modal-dialog { margin: 12px; }
   }
 
   /* Правки для "линий" в блоке выбора файла */
@@ -401,18 +412,49 @@
 				{% else %}
 					<p>Тарифы не добавлены.</p>
 				{% endif %}
-					<h5>Добавить новый тариф:</h5>
-					<form action="{{ url_for('add_plan_route') }}" method="post" class="form-inline">
-						<input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-						<input type="hidden" name="host_name" value="global" />
+						<h5>Добавить новый тариф:</h5>
+						<form action="{{ url_for('add_plan_route') }}" method="post" class="form-inline">
+							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+							<input type="hidden" name="host_name" value="global" />
 						<input type="text" class="form-control pill" name="plan_name" placeholder="Название" required />
 						<input type="number" class="form-control pill" name="months" placeholder="Мес." required />
-						<input type="number" step="0.01" class="form-control pill" name="price" placeholder="Цена" required />
-						<button type="submit" class="btn btn-primary btn-sm pill">+</button>
-					</form>
+							<input type="number" step="0.01" class="form-control pill" name="price" placeholder="Цена" required />
+							<button type="submit" class="btn btn-primary btn-sm pill">+</button>
+						</form>
+						<hr />
+						<h5>Создать промокод:</h5>
+						<form action="{{ url_for('settings_create_promo_route') }}" method="post" class="form-inline">
+							<input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+							<input type="text" class="form-control pill" name="code" placeholder="Код" required />
+							<select class="form-control pill" name="discount_mode">
+								<option value="percent">Скидка %</option>
+								<option value="amount">Скидка RUB</option>
+							</select>
+							<input type="number" step="0.01" class="form-control pill" name="discount_value" placeholder="Значение скидки" required />
+							<input type="number" class="form-control pill" name="valid_days" placeholder="Действует N дней" />
+							<input type="number" class="form-control pill" name="usage_limit_total" placeholder="Лимит общий" />
+							<input type="number" class="form-control pill" name="usage_limit_per_user" placeholder="Лимит на пользователя" />
+							<input type="text" class="form-control pill" name="description" placeholder="Описание" />
+							<button type="submit" class="btn btn-primary btn-sm pill">Создать промокод</button>
+						</form>
+						{% if promos %}
+						<div class="mt-3">
+							{% for promo in promos[:8] %}
+							<div class="plan-row">
+								<span class="plan-label">
+									{{ promo.code }}
+									—
+									{% if promo.discount_percent %}{{ promo.discount_percent|round(0) }}%{% else %}{{ promo.discount_amount|round(0) }} RUB{% endif %}
+									—
+									{% if promo.is_active %}активен{% else %}выключен{% endif %}
+								</span>
+							</div>
+							{% endfor %}
+						</div>
+						{% endif %}
+					</div>
 				</div>
-			</div>
-		</section>
+			</section>
 	</div>
 
 	<div class="settings-column-right">
