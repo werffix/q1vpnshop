@@ -121,6 +121,16 @@ def get_admin_router() -> Router:
             return f"{int(value)} {units[idx]}"
         return f"{value:.2f} {units[idx]}"
 
+    def _format_traffic_gb(value_bytes: int | float | None) -> str:
+        try:
+            value = float(value_bytes or 0)
+        except Exception:
+            value = 0.0
+        if value < 0:
+            value = 0.0
+        value_gb = value / (1024 ** 3)
+        return f"{value_gb:.2f} GB"
+
     def _obj_get(obj, key: str, default=None):
         try:
             if isinstance(obj, dict):
@@ -304,7 +314,7 @@ def get_admin_router() -> Router:
                 continue
             used = int(result.get("used") or 0)
             online = int(result.get("online") or 0)
-            traffic_lines.append(f"{prefix} {host_name} (онлайн: {online}): {_format_traffic(used)}")
+            traffic_lines.append(f"{prefix} {host_name} (онлайн: {online}): {_format_traffic_gb(used)}")
         traffic_block = (
             "🌐 <b>Использование трафика (общее):</b>\n" + "\n".join(traffic_lines)
             if traffic_lines
