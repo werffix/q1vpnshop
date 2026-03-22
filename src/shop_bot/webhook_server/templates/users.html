@@ -151,7 +151,7 @@
         </thead>
         <tbody id="users-tbody"
                data-fetch-url="{{ url_for('users_table_partial', page=current_page or 1, per_page=per_page or 20, q=q or '', sort=sort_by or 'new') }}"
-               data-fetch-interval="10000"
+               data-fetch-interval="60000"
                data-current-page="{{ current_page or 1 }}"
                data-per-page="{{ per_page or 20 }}"
                data-q="{{ q or '' }}"
@@ -488,10 +488,13 @@
     const tbody = document.getElementById('users-tbody');
     if (!tbody) return;
     try { tbody.dispatchEvent(new Event('soft-update-stop')); } catch(_){ }
-    // Свой авто-таймер, который использует актуальный data-fetch-url
+    // Более редкий авто-таймер и только для активной вкладки, чтобы не нагружать CPU.
     let timer = null;
-    function tick(){ try { window.refreshContainerById('users-tbody'); } catch(_){ } }
-    timer = setInterval(tick, 10000);
+    function tick(){
+      if (document.hidden) return;
+      try { window.refreshContainerById('users-tbody'); } catch(_){ }
+    }
+    timer = setInterval(tick, 60000);
     window.addEventListener('beforeunload', () => { if (timer) { clearInterval(timer); timer=null; } });
   })();
   </script>

@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 import json
+import copy
 import hashlib
 import binascii
 import html as html_escape
@@ -180,6 +181,11 @@ def create_webhook_app(bot_controller_instance):
         except Exception:
             return "q1 vpn"
 
+    _traffic_stats_cache: dict[tuple[str, str], tuple[float, dict | None]] = {}
+    _users_panel_cache: dict[tuple[int, int, str, str], tuple[float, tuple[list[dict], int]]] = {}
+    _TRAFFIC_STATS_CACHE_TTL_SEC = 60.0
+    _USERS_PANEL_CACHE_TTL_SEC = 20.0
+
     def _format_traffic(value_bytes: int | float | None) -> str:
         try:
             value = float(value_bytes or 0)
@@ -202,6 +208,11 @@ def create_webhook_app(bot_controller_instance):
             panel_email = str(key_data.get("panel_email") or key_data.get("key_email") or "").strip()
             if not server_id or not panel_email:
                 return None
+            cache_key = (server_id, panel_email)
+            now = time.time()
+            cached = _traffic_stats_cache.get(cache_key)
+            if cached and (now - cached[0]) < _TRAFFIC_STATS_CACHE_TTL_SEC:
+                return copy.deepcopy(cached[1])
             client_host = await xui_api.get_client(server_id)
             if not client_host:
                 return None
@@ -211,7 +222,9 @@ def create_webhook_app(bot_controller_instance):
             up = max(int(stats.get("up") or 0), 0)
             down = max(int(stats.get("down") or 0), 0)
             total = max(int(stats.get("total") or 0), 0)
-            return {"up": up, "down": down, "total": total}
+            payload = {"up": up, "down": down, "total": total}
+            _traffic_stats_cache[cache_key] = (now, copy.deepcopy(payload))
+            return payload
         except Exception:
             return None
 
@@ -271,6 +284,13 @@ def create_webhook_app(bot_controller_instance):
 
         query = (q or "").strip().lower()
         sort_mode = (sort_by or "new").strip().lower()
+        cache_key = (page, per_page, query, sort_mode)
+        now = time.time()
+        cached = _users_panel_cache.get(cache_key)
+        if cached and (now - cached[0]) < _USERS_PANEL_CACHE_TTL_SEC:
+            users, total = cached[1]
+            return copy.deepcopy(users), int(total or 0)
+
         users = get_all_users() or []
 
         if query:
@@ -305,7 +325,9 @@ def create_webhook_app(bot_controller_instance):
         total = len(users)
         start = (page - 1) * per_page
         end = start + per_page
-        return users[start:end], total
+        page_items = users[start:end]
+        _users_panel_cache[cache_key] = (now, (copy.deepcopy(page_items), int(total or 0)))
+        return page_items, total
 
     def _extract_happ_crypto_url(raw_text: str) -> str | None:
         text = (raw_text or "").strip()
