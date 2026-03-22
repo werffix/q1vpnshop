@@ -161,6 +161,29 @@ def get_admin_router() -> Router:
             return int(total_gb_like)
         return int(total_gb_like * (1024 ** 3))
 
+    def _extract_inbound_used_bytes(inbound_obj) -> int:
+        values = [
+            _obj_get(inbound_obj, "up"),
+            _obj_get(inbound_obj, "down"),
+            _obj_get(inbound_obj, "upload"),
+            _obj_get(inbound_obj, "download"),
+            _obj_get(inbound_obj, "upload_bytes"),
+            _obj_get(inbound_obj, "download_bytes"),
+            _obj_get(inbound_obj, "upStats"),
+            _obj_get(inbound_obj, "downStats"),
+        ]
+        total = 0
+        found = False
+        for value in values:
+            try:
+                num = int(value or 0)
+            except Exception:
+                continue
+            if num > 0:
+                total += num
+                found = True
+        return total if found else 0
+
     def _is_client_online(client_obj) -> bool:
         direct_flags = (
             _obj_get(client_obj, "online"),
@@ -204,7 +227,7 @@ def get_admin_router() -> Router:
                 full_inbound = inbound
 
             clients = (_obj_get(_obj_get(full_inbound, "settings"), "clients") or [])
-            used_total = 0
+            used_total = _extract_inbound_used_bytes(full_inbound)
             online_count = 0
             for client in clients:
                 up = max(
@@ -219,13 +242,10 @@ def get_admin_router() -> Router:
                     or _to_int(_obj_get(client, "download_bytes")),
                     0,
                 )
-                total = _extract_total_bytes(client)
-                used_total += up + down
+                if used_total <= 0:
+                    used_total += up + down
                 if _is_client_online(client):
                     online_count += 1
-                if total > 0:
-                    # Touch the field so that used traffic is taken from direct inbound stats.
-                    pass
 
             return {
                 "host_name": host_name,
@@ -269,7 +289,7 @@ def get_admin_router() -> Router:
         total_income = float(stats.get('total_income', 0) or 0)
         total_keys = stats.get('total_keys', 0)
         active_keys = stats.get('active_keys', 0)
-        hosts = get_all_hosts() or []
+        hosts = [h for h in (get_all_hosts() or []) if int(h.get("is_expired_host") or 0) != 1]
         host_traffic_results = await asyncio.gather(
             *[_get_host_total_traffic(h) for h in hosts],
             return_exceptions=True,

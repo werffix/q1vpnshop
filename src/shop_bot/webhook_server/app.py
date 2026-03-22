@@ -180,6 +180,83 @@ def create_webhook_app(bot_controller_instance):
         except Exception:
             return "q1 vpn"
 
+    def _format_traffic(value_bytes: int | float | None) -> str:
+        try:
+            value = float(value_bytes or 0)
+        except Exception:
+            value = 0.0
+        if value < 0:
+            value = 0.0
+        units = ["Б", "КБ", "МБ", "ГБ", "ТБ"]
+        idx = 0
+        while value >= 1024 and idx < len(units) - 1:
+            value /= 1024.0
+            idx += 1
+        if idx == 0:
+            return f"{int(value)} {units[idx]}"
+        return f"{value:.2f} {units[idx]}"
+
+    async def _get_live_traffic_stats_for_key(key_data: dict) -> dict | None:
+        try:
+            server_id = str(key_data.get("server_id") or key_data.get("host_name") or "").strip()
+            panel_email = str(key_data.get("panel_email") or key_data.get("key_email") or "").strip()
+            if not server_id or not panel_email:
+                return None
+            client_host = await xui_api.get_client(server_id)
+            if not client_host:
+                return None
+            stats = await xui_api.get_client_stats(client_host, panel_email)
+            if not stats:
+                return None
+            up = max(int(stats.get("up") or 0), 0)
+            down = max(int(stats.get("down") or 0), 0)
+            total = max(int(stats.get("total") or 0), 0)
+            return {"up": up, "down": down, "total": total}
+        except Exception:
+            return None
+
+    async def _collect_live_traffic_stats_for_keys(user_keys: list[dict]) -> list[dict | Exception | None]:
+        return await asyncio.gather(
+            *[_get_live_traffic_stats_for_key(key_data) for key_data in (user_keys or [])],
+            return_exceptions=True,
+        )
+
+    def _enrich_users_for_panel(users: list[dict]) -> list[dict]:
+        users = list(users or [])
+        for user in users:
+            uid = user['telegram_id']
+            user_keys = get_user_keys(uid) or []
+            user['user_keys'] = user_keys
+            try:
+                user['balance'] = get_balance(uid)
+                user['referrals'] = get_referrals_for_user(uid)
+                user['device_limit'] = get_user_device_limit(uid, default_limit=3)
+            except Exception:
+                user['balance'] = 0.0
+                user['referrals'] = []
+                user['device_limit'] = 3
+
+            latest_expiry = ""
+            for key in user_keys:
+                raw_expiry = str(key.get("expiry_date") or "").strip()
+                if raw_expiry and (not latest_expiry or raw_expiry > latest_expiry):
+                    latest_expiry = raw_expiry
+            user['subscription_expiry'] = latest_expiry
+            user['referrals_count'] = len(user.get('referrals') or [])
+
+            try:
+                traffic_results = asyncio.run(_collect_live_traffic_stats_for_keys(user_keys)) if user_keys else []
+            except Exception:
+                traffic_results = []
+
+            for key_data, result in zip(user_keys, traffic_results):
+                if isinstance(result, Exception) or not isinstance(result, dict):
+                    key_data['traffic_used_text'] = "Недоступно"
+                    continue
+                used = max(int(result.get("up") or 0), 0) + max(int(result.get("down") or 0), 0)
+                key_data['traffic_used_text'] = _format_traffic(used)
+        return users
+
     def _extract_happ_crypto_url(raw_text: str) -> str | None:
         text = (raw_text or "").strip()
         if not text:
@@ -892,17 +969,7 @@ def create_webhook_app(bot_controller_instance):
         from shop_bot.data_manager.database import get_users_paginated
         users, total = get_users_paginated(page=page, per_page=per_page, q=q or None)
 
-        for user in users:
-            uid = user['telegram_id']
-            user['user_keys'] = get_user_keys(uid)
-            try:
-                user['balance'] = get_balance(uid)
-                user['referrals'] = get_referrals_for_user(uid)
-                user['device_limit'] = get_user_device_limit(uid, default_limit=3)
-            except Exception:
-                user['balance'] = 0.0
-                user['referrals'] = []
-                user['device_limit'] = 3
+        users = _enrich_users_for_panel(users)
 
         total_pages = max(1, ceil(total / per_page)) if total else 1
         common_data = get_common_template_data()
@@ -926,17 +993,7 @@ def create_webhook_app(bot_controller_instance):
         q = (request.args.get('q') or '').strip()
         from shop_bot.data_manager.database import get_users_paginated
         users, total = get_users_paginated(page=page, per_page=per_page, q=q or None)
-        for user in users:
-            uid = user['telegram_id']
-            user['user_keys'] = get_user_keys(uid)
-            try:
-                user['balance'] = get_balance(uid)
-                user['referrals'] = get_referrals_for_user(uid)
-                user['device_limit'] = get_user_device_limit(uid, default_limit=3)
-            except Exception:
-                user['balance'] = 0.0
-                user['referrals'] = []
-                user['device_limit'] = 3
+        users = _enrich_users_for_panel(users)
         return render_template('partials/users_table.html', users=users)
 
     @flask_app.route('/users/<int:user_id>/balance/adjust', methods=['POST'])

@@ -22,7 +22,9 @@
             data-referrals='{{ user.referrals|tojson|e }}'
             data-keys='{{ user.user_keys|tojson|e }}'
             data-subscription-link="{{ user.subscription_link or '' }}"
-            data-subscription-status="{{ user.subscription_status or '' }}">
+            data-subscription-status="{{ user.subscription_status or '' }}"
+            data-subscription-expiry="{{ user.subscription_expiry or '' }}"
+            data-referrals-count="{{ user.referrals_count or 0 }}">
       Открыть
     </button>
   </td>

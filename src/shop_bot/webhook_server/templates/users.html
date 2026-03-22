@@ -63,6 +63,8 @@
             <div class="mb-1">Баланс: <strong id="um-balance">0.00</strong> RUB</div>
             <div class="mb-1">Лимит устройств: <strong id="um-device-limit">3</strong></div>
             <div class="mb-1">Статус подписки: <strong id="um-sub-status">-</strong></div>
+            <div class="mb-1">Истекает подписка: <strong id="um-sub-expiry">-</strong></div>
+            <div class="mb-1">Приглашено друзей: <strong id="um-referrals-count">0</strong></div>
             <div class="mb-2">Ссылка подписки: <code id="um-sub-link">-</code></div>
           </div>
           <div class="col-md-6">
@@ -116,7 +118,7 @@
                 <th>Хост</th>
                 <th>Email</th>
                 <th>UUID</th>
-                <th>Истекает</th>
+                <th>Расход трафика</th>
               </tr>
             </thead>
             <tbody id="um-keys-body"></tbody>
@@ -358,6 +360,8 @@
       const isBanned = btn.getAttribute('data-is-banned') === '1';
       const subLink = btn.getAttribute('data-subscription-link') || '';
       const subStatus = btn.getAttribute('data-subscription-status') || '—';
+      const subExpiry = btn.getAttribute('data-subscription-expiry') || '—';
+      const referralsCount = btn.getAttribute('data-referrals-count') || '0';
       let refs = [];
       let keys = [];
       try { refs = JSON.parse(btn.getAttribute('data-referrals') || '[]'); } catch(_){ refs = []; }
@@ -369,6 +373,8 @@
       modalEl.querySelector('#um-balance').textContent = balance;
       modalEl.querySelector('#um-device-limit').textContent = deviceLimit;
       modalEl.querySelector('#um-sub-status').textContent = subStatus || '—';
+      modalEl.querySelector('#um-sub-expiry').textContent = subExpiry || '—';
+      modalEl.querySelector('#um-referrals-count').textContent = referralsCount || '0';
       modalEl.querySelector('#um-sub-link').textContent = subLink || '—';
 
       const balanceForm = modalEl.querySelector('#um-balance-form');
@@ -410,7 +416,7 @@
               <td>${k.host_name ?? ''}</td>
               <td>${k.key_email ?? ''}</td>
               <td class="text-truncate" style="max-width:220px">${k.xui_client_uuid ?? ''}</td>
-              <td>${k.expiry_date ?? ''}</td>
+              <td>${k.traffic_used_text ?? 'Недоступно'}</td>
             </tr>`
           )).join('');
         } else {
