@@ -9,6 +9,11 @@
     <div class="col-auto ms-auto d-print-none">
       <div class="d-flex gap-2">
         <input id="users-search" type="text" class="form-control" placeholder="Поиск по ID или Username..." value="{{ q or '' }}" />
+        <select id="users-sort" class="form-select" title="Сортировка">
+          <option value="new" {% if (sort_by or 'new') == 'new' %}selected{% endif %}>Сначала новые</option>
+          <option value="traffic" {% if (sort_by or '') == 'traffic' %}selected{% endif %}>С большим трафиком</option>
+          <option value="referrals" {% if (sort_by or '') == 'referrals' %}selected{% endif %}>С большим приглашением друзей</option>
+        </select>
         <select id="users-per-page" class="form-select" title="На странице">
           {% set _pp = per_page or 20 %}
           <option value="10" {% if _pp == 10 %}selected{% endif %}>10</option>
@@ -16,6 +21,7 @@
           <option value="50" {% if _pp == 50 %}selected{% endif %}>50</option>
           <option value="100" {% if _pp == 100 %}selected{% endif %}>100</option>
         </select>
+        <button id="users-apply" type="button" class="btn btn-primary">Фильтр</button>
       </div>
     </div>
   </div>
@@ -144,11 +150,12 @@
           </tr>
         </thead>
         <tbody id="users-tbody"
-               data-fetch-url="{{ url_for('users_table_partial', page=current_page or 1, per_page=per_page or 20, q=q or '') }}"
+               data-fetch-url="{{ url_for('users_table_partial', page=current_page or 1, per_page=per_page or 20, q=q or '', sort=sort_by or 'new') }}"
                data-fetch-interval="10000"
                data-current-page="{{ current_page or 1 }}"
                data-per-page="{{ per_page or 20 }}"
-               data-q="{{ q or '' }}">
+               data-q="{{ q or '' }}"
+               data-sort="{{ sort_by or 'new' }}">
           {% include 'partials/users_table.html' %}
         </tbody>
       </table>
@@ -194,6 +201,8 @@
     const input = document.getElementById('users-search');
     const table = document.getElementById('users-table');
     const perPageSel = document.getElementById('users-per-page');
+    const sortSel = document.getElementById('users-sort');
+    const applyBtn = document.getElementById('users-apply');
     const tbody = document.getElementById('users-tbody');
     const baseUrl = document.getElementById('users-base-url')?.value || "{{ url_for('users_table_partial') }}";
     if (!input || !table) return;
@@ -261,29 +270,39 @@
         }
       });
     }
-    function buildPartialUrl(page, perPage, q){
+    function buildPartialUrl(page, perPage, q, sort){
       const params = new URLSearchParams();
       params.set('page', String(page||1));
       params.set('per_page', String(perPage||20));
       if (q) params.set('q', q);
+      if (sort) params.set('sort', sort);
       return baseUrl + '?' + params.toString();
     }
-    function syncTbodyUrl(page, perPage, q){
+    function syncTbodyUrl(page, perPage, q, sort){
       if (!tbody) return;
       tbody.setAttribute('data-current-page', String(page));
       tbody.setAttribute('data-per-page', String(perPage));
       tbody.setAttribute('data-q', q || '');
-      const url = buildPartialUrl(page, perPage, q);
+      tbody.setAttribute('data-sort', sort || 'new');
+      const url = buildPartialUrl(page, perPage, q, sort);
       tbody.setAttribute('data-fetch-url', url);
     }
-    function updateAddressBar(page, perPage, q){
+    function buildPageUrl(page, perPage, q, sort){
       try{
         const u = new URL(window.location.href);
         u.searchParams.set('page', String(page||1));
         u.searchParams.set('per_page', String(perPage||20));
         if (q) u.searchParams.set('q', q); else u.searchParams.delete('q');
-        history.replaceState(null, '', u.toString());
-      }catch(_){ }
+        if (sort) u.searchParams.set('sort', sort); else u.searchParams.delete('sort');
+        return u.toString();
+      }catch(_){ return window.location.href; }
+    }
+    function navigateUsers(page){
+      const q = input.value.trim();
+      const perPage = Number(perPageSel?.value || tbody?.getAttribute('data-per-page') || 20);
+      const sort = sortSel?.value || tbody?.getAttribute('data-sort') || 'new';
+      syncTbodyUrl(page, perPage, q, sort);
+      window.location.assign(buildPageUrl(page, perPage, q, sort));
     }
     function refreshUsers(){ try { return window.refreshContainerById('users-tbody'); } catch(_){ return Promise.resolve(); } }
     function withUserId(url, uid){
@@ -301,44 +320,40 @@
       return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
     }
     let tDeb = null;
-    function onSearchChanged(){
+    function onSearchChanged(immediate){
       clearTimeout(tDeb);
-      tDeb = setTimeout(async () => {
-        const q = input.value.trim();
-        const perPage = Number(perPageSel?.value || tbody?.getAttribute('data-per-page') || 20);
-        const page = 1;
-        syncTbodyUrl(page, perPage, q);
-        updateAddressBar(page, perPage, q);
-        await refreshUsers();
-      }, 250);
+      const run = () => navigateUsers(1);
+      if (immediate) {
+        run();
+        return;
+      }
+      tDeb = setTimeout(run, 250);
     }
-    input.addEventListener('input', onSearchChanged);
-    input.addEventListener('search', onSearchChanged);
+    input.addEventListener('input', () => onSearchChanged(false));
+    input.addEventListener('search', () => onSearchChanged(true));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        onSearchChanged(true);
+      }
+    });
+    if (applyBtn){
+      applyBtn.addEventListener('click', () => navigateUsers(1));
+    }
     if (perPageSel){
-      perPageSel.addEventListener('change', async () => {
-        const q = input.value.trim();
-        const perPage = Number(perPageSel.value || 20);
-        const page = 1;
-        syncTbodyUrl(page, perPage, q);
-        updateAddressBar(page, perPage, q);
-        await refreshUsers();
-      });
+      perPageSel.addEventListener('change', () => navigateUsers(1));
+    }
+    if (sortSel){
+      sortSel.addEventListener('change', () => navigateUsers(1));
     }
     // Пагинация: делегирование кликов по .pagination
-    document.addEventListener('click', async (e) => {
+    document.addEventListener('click', (e) => {
       const a = e.target.closest('.pagination a.page-link');
       if (!a) return;
       e.preventDefault();
       const page = Number(a.getAttribute('data-page')||'1');
       if (!page || page < 1) return;
-      const q = input.value.trim();
-      const perPage = Number(perPageSel?.value || 20);
-      syncTbodyUrl(page, perPage, q);
-      updateAddressBar(page, perPage, q);
-      await refreshUsers();
-      // визуально подсветим активную страницу без перезагрузки
-      document.querySelectorAll('.pagination li').forEach(li => li.classList.remove('active'));
-      const li = a.closest('li'); if (li) li.classList.add('active');
+      navigateUsers(page);
     });
     // При автообновлении tbody — снова применяем фильтр
     (function(){

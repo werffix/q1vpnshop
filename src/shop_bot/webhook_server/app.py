@@ -249,13 +249,63 @@ def create_webhook_app(bot_controller_instance):
             except Exception:
                 traffic_results = []
 
+            user_total_traffic = 0
             for key_data, result in zip(user_keys, traffic_results):
                 if isinstance(result, Exception) or not isinstance(result, dict):
+                    key_data['traffic_used_bytes'] = None
                     key_data['traffic_used_text'] = "Недоступно"
                     continue
                 used = max(int(result.get("up") or 0), 0) + max(int(result.get("down") or 0), 0)
+                key_data['traffic_used_bytes'] = used
                 key_data['traffic_used_text'] = _format_traffic(used)
+                user_total_traffic += used
+            user['traffic_used_total_bytes'] = user_total_traffic
         return users
+
+    def _get_sorted_users_for_panel(page: int, per_page: int, q: str | None = None, sort_by: str | None = None) -> tuple[list[dict], int]:
+        try:
+            page = max(1, int(page or 1))
+            per_page = max(1, min(100, int(per_page or 20)))
+        except Exception:
+            page, per_page = 1, 20
+
+        query = (q or "").strip().lower()
+        sort_mode = (sort_by or "new").strip().lower()
+        users = get_all_users() or []
+
+        if query:
+            filtered: list[dict] = []
+            for user in users:
+                telegram_id = str(user.get("telegram_id") or "")
+                username = str(user.get("username") or "")
+                if query in telegram_id.lower() or query in username.lower():
+                    filtered.append(user)
+            users = filtered
+
+        users = _enrich_users_for_panel(users)
+
+        if sort_mode == "traffic":
+            users.sort(
+                key=lambda user: (
+                    -int(user.get("traffic_used_total_bytes") or 0),
+                    str(user.get("registration_date") or ""),
+                )
+            )
+        elif sort_mode == "referrals":
+            users.sort(
+                key=lambda user: (
+                    -int(user.get("referrals_count") or 0),
+                    str(user.get("registration_date") or ""),
+                )
+            )
+        else:
+            users.sort(key=lambda user: str(user.get("registration_date") or ""), reverse=True)
+            sort_mode = "new"
+
+        total = len(users)
+        start = (page - 1) * per_page
+        end = start + per_page
+        return users[start:end], total
 
     def _extract_happ_crypto_url(raw_text: str) -> str | None:
         text = (raw_text or "").strip()
@@ -964,12 +1014,8 @@ def create_webhook_app(bot_controller_instance):
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         q = (request.args.get('q') or '').strip()
-
-        # Получаем ограниченный набор пользователей с серверной фильтрацией
-        from shop_bot.data_manager.database import get_users_paginated
-        users, total = get_users_paginated(page=page, per_page=per_page, q=q or None)
-
-        users = _enrich_users_for_panel(users)
+        sort_by = (request.args.get('sort') or 'new').strip().lower()
+        users, total = _get_sorted_users_for_panel(page=page, per_page=per_page, q=q or None, sort_by=sort_by)
 
         total_pages = max(1, ceil(total / per_page)) if total else 1
         common_data = get_common_template_data()
@@ -981,6 +1027,7 @@ def create_webhook_app(bot_controller_instance):
             total_users=total,
             per_page=per_page,
             q=q,
+            sort_by=sort_by,
             **common_data
         )
 
@@ -991,9 +1038,8 @@ def create_webhook_app(bot_controller_instance):
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         q = (request.args.get('q') or '').strip()
-        from shop_bot.data_manager.database import get_users_paginated
-        users, total = get_users_paginated(page=page, per_page=per_page, q=q or None)
-        users = _enrich_users_for_panel(users)
+        sort_by = (request.args.get('sort') or 'new').strip().lower()
+        users, total = _get_sorted_users_for_panel(page=page, per_page=per_page, q=q or None, sort_by=sort_by)
         return render_template('partials/users_table.html', users=users)
 
     @flask_app.route('/users/<int:user_id>/balance/adjust', methods=['POST'])

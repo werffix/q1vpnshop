@@ -4,6 +4,10 @@ import time
 import uuid
 import re
 import html as html_escape
+import json
+import urllib.parse
+import urllib.request
+import http.cookiejar
 from datetime import datetime, timedelta
 import secrets
 import string
@@ -142,118 +146,114 @@ def get_admin_router() -> Router:
         except Exception:
             return 0.0
 
-    def _extract_total_bytes(client_obj) -> int:
-        total = max(
-            _to_int(_obj_get(client_obj, "total"))
-            or _to_int(_obj_get(client_obj, "total_bytes"))
-            or _to_int(_obj_get(client_obj, "limit")),
-            0,
-        )
-        if total > 0:
-            return total
-        total_gb_like = _to_float(_obj_get(client_obj, "totalGB"))
-        if total_gb_like <= 0:
-            total_gb_like = _to_float(_obj_get(client_obj, "total_gb"))
-        if total_gb_like <= 0:
-            return 0
-        # Some panels return bytes in totalGB-like field, some return real GB.
-        if total_gb_like > 10_000_000:
-            return int(total_gb_like)
-        return int(total_gb_like * (1024 ** 3))
+    def _build_xui_http_attempts(host_url: str) -> list[tuple[str, str, str]]:
+        attempts: list[tuple[str, str, str]] = []
+        for base in (xui_api.build_xui_host_candidates(host_url) or []):
+            cleaned = str(base or "").rstrip("/")
+            if not cleaned:
+                continue
+            if cleaned.endswith("/panel"):
+                variants = [
+                    (f"{cleaned}/login", f"{cleaned}/api/inbounds/list", f"{cleaned}/api/inbounds/onlines"),
+                ]
+            else:
+                variants = [
+                    (f"{cleaned}/login", f"{cleaned}/panel/api/inbounds/list", f"{cleaned}/panel/api/inbounds/onlines"),
+                    (f"{cleaned}/panel/login", f"{cleaned}/panel/api/inbounds/list", f"{cleaned}/panel/api/inbounds/onlines"),
+                ]
+            for item in variants:
+                if item not in attempts:
+                    attempts.append(item)
+        return attempts
 
-    def _extract_inbound_used_bytes(inbound_obj) -> int:
-        values = [
-            _obj_get(inbound_obj, "up"),
-            _obj_get(inbound_obj, "down"),
-            _obj_get(inbound_obj, "upload"),
-            _obj_get(inbound_obj, "download"),
-            _obj_get(inbound_obj, "upload_bytes"),
-            _obj_get(inbound_obj, "download_bytes"),
-            _obj_get(inbound_obj, "upStats"),
-            _obj_get(inbound_obj, "downStats"),
-        ]
-        total = 0
-        found = False
-        for value in values:
+    def _xui_request_json(opener, url: str, method: str = "GET", payload: dict | None = None, timeout: int = 15) -> dict | None:
+        body = None
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json, text/plain, */*",
+        }
+        if payload is not None:
+            body = json.dumps(payload).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        request_obj = urllib.request.Request(url, data=body, headers=headers, method=method)
+        with opener.open(request_obj, timeout=timeout) as response:
+            raw = response.read().decode("utf-8", errors="ignore")
+        try:
+            return json.loads(raw)
+        except Exception:
+            return None
+
+    def _xui_login_and_collect_host_usage(host_data: dict) -> dict:
+        host_name = str((host_data or {}).get("host_name") or "—").strip() or "—"
+        username = str((host_data or {}).get("host_username") or "").strip()
+        password = str((host_data or {}).get("host_pass") or "").strip()
+        attempts = _build_xui_http_attempts(host_data.get("host_url") or "")
+        if not attempts or not username or not password:
+            return {"host_name": host_name, "ok": False}
+
+        for login_url, list_url, onlines_url in attempts:
+            jar = http.cookiejar.CookieJar()
+            opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+            login_payload = urllib.parse.urlencode({"username": username, "password": password}).encode("utf-8")
+            login_request = urllib.request.Request(
+                login_url,
+                data=login_payload,
+                headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                    "Accept": "application/json, text/plain, */*",
+                },
+                method="POST",
+            )
             try:
-                num = int(value or 0)
+                with opener.open(login_request, timeout=15) as response:
+                    login_raw = response.read().decode("utf-8", errors="ignore")
+                login_ok = True
+                if login_raw:
+                    try:
+                        login_json = json.loads(login_raw)
+                        login_ok = bool(login_json.get("success", True))
+                    except Exception:
+                        login_ok = True
+                if not login_ok:
+                    continue
+
+                list_response = _xui_request_json(opener, list_url, method="GET", timeout=15) or {}
+                if not list_response.get("success"):
+                    continue
+                inbounds = list_response.get("obj") or []
+                used_total = 0
+                for inbound in inbounds:
+                    try:
+                        used_total += int((inbound or {}).get("up") or 0)
+                        used_total += int((inbound or {}).get("down") or 0)
+                    except Exception:
+                        continue
+
+                online_response = _xui_request_json(opener, onlines_url, method="POST", timeout=15) or {}
+                online_count = 0
+                if online_response.get("success"):
+                    online_obj = online_response.get("obj")
+                    if isinstance(online_obj, list):
+                        online_count = len(online_obj)
+                    elif isinstance(online_obj, dict):
+                        online_count = len(online_obj)
+
+                return {
+                    "host_name": host_name,
+                    "ok": True,
+                    "used": max(int(used_total or 0), 0),
+                    "online": max(int(online_count or 0), 0),
+                }
             except Exception:
                 continue
-            if num > 0:
-                total += num
-                found = True
-        return total if found else 0
-
-    def _is_client_online(client_obj) -> bool:
-        direct_flags = (
-            _obj_get(client_obj, "online"),
-            _obj_get(client_obj, "is_online"),
-            _obj_get(client_obj, "isOnline"),
-        )
-        for flag in direct_flags:
-            if isinstance(flag, bool):
-                return flag
-            if isinstance(flag, (int, float)) and int(flag) > 0:
-                return True
-            if isinstance(flag, str) and flag.strip().lower() in {"1", "true", "online", "yes"}:
-                return True
-
-        for key in ("ip_count", "ipCount", "current_ip", "currentIp", "online_ip_count"):
-            value = _obj_get(client_obj, key)
-            try:
-                if int(value or 0) > 0:
-                    return True
-            except Exception:
-                continue
-
-        status = str(_obj_get(client_obj, "status") or "").strip().lower()
-        return status == "online"
+        return {"host_name": host_name, "ok": False}
 
     def _get_host_total_traffic_sync(host_data: dict) -> dict:
-        host_name = str((host_data or {}).get("host_name") or "—").strip() or "—"
         try:
-            api, inbound = xui_api.login_to_host(
-                host_url=host_data.get("host_url"),
-                username=host_data.get("host_username"),
-                password=host_data.get("host_pass"),
-                inbound_id=host_data.get("host_inbound_id"),
-            )
-            if not api or not inbound:
-                return {"host_name": host_name, "ok": False}
-
-            try:
-                full_inbound = api.inbound.get_by_id(inbound.id)
-            except Exception:
-                full_inbound = inbound
-
-            clients = (_obj_get(_obj_get(full_inbound, "settings"), "clients") or [])
-            used_total = _extract_inbound_used_bytes(full_inbound)
-            online_count = 0
-            for client in clients:
-                up = max(
-                    _to_int(_obj_get(client, "up"))
-                    or _to_int(_obj_get(client, "upload"))
-                    or _to_int(_obj_get(client, "upload_bytes")),
-                    0,
-                )
-                down = max(
-                    _to_int(_obj_get(client, "down"))
-                    or _to_int(_obj_get(client, "download"))
-                    or _to_int(_obj_get(client, "download_bytes")),
-                    0,
-                )
-                if used_total <= 0:
-                    used_total += up + down
-                if _is_client_online(client):
-                    online_count += 1
-
-            return {
-                "host_name": host_name,
-                "ok": True,
-                "used": max(used_total, 0),
-                "online": max(online_count, 0),
-            }
+            return _xui_login_and_collect_host_usage(host_data)
         except Exception:
+            host_name = str((host_data or {}).get("host_name") or "—").strip() or "—"
             return {"host_name": host_name, "ok": False}
 
     async def _get_host_total_traffic(host_data: dict) -> dict:
