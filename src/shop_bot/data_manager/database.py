@@ -133,19 +133,6 @@ def initialize_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS subscription_devices (
-                    device_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER NOT NULL,
-                    device_fingerprint TEXT NOT NULL UNIQUE,
-                    device_name TEXT NOT NULL,
-                    user_agent TEXT,
-                    last_ip TEXT,
-                    first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    is_revoked INTEGER NOT NULL DEFAULT 0
-                )
-            ''')
             try:
                 cursor.execute("PRAGMA table_info(traffic_package_purchases)")
                 tpp_cols = {row[1] for row in cursor.fetchall()}
@@ -2167,104 +2154,6 @@ def get_extra_traffic_gb_for_user_key(user_id: int, host_name: str, key_email: s
         logging.error(f"Не удалось получить докупленный трафик пользователя {user_id} для ключа {key_email}: {e}")
         return 0.0
 
-def upsert_subscription_device(
-    user_id: int,
-    device_fingerprint: str,
-    device_name: str,
-    user_agent: str | None = None,
-    last_ip: str | None = None,
-) -> bool:
-    try:
-        now = datetime.now().isoformat(sep=" ", timespec="seconds")
-        with sqlite3.connect(DB_FILE) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO subscription_devices
-                    (user_id, device_fingerprint, device_name, user_agent, last_ip, first_seen_at, last_seen_at, is_revoked)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0)
-                ON CONFLICT(device_fingerprint) DO UPDATE SET
-                    user_id=excluded.user_id,
-                    device_name=excluded.device_name,
-                    user_agent=excluded.user_agent,
-                    last_ip=excluded.last_ip,
-                    last_seen_at=excluded.last_seen_at
-                """,
-                (
-                    int(user_id),
-                    str(device_fingerprint),
-                    str(device_name),
-                    (str(user_agent) if user_agent else None),
-                    (str(last_ip) if last_ip else None),
-                    now,
-                    now,
-                ),
-            )
-            conn.commit()
-            return True
-    except sqlite3.Error as e:
-        logging.error(f"Не удалось обновить устройство подписки пользователя {user_id}: {e}")
-        return False
-
-def get_user_subscription_devices(user_id: int, include_revoked: bool = False) -> list[dict]:
-    try:
-        with sqlite3.connect(DB_FILE) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            if include_revoked:
-                cursor.execute(
-                    """
-                    SELECT * FROM subscription_devices
-                    WHERE user_id = ?
-                    ORDER BY last_seen_at DESC, device_id DESC
-                    """,
-                    (int(user_id),),
-                )
-            else:
-                cursor.execute(
-                    """
-                    SELECT * FROM subscription_devices
-                    WHERE user_id = ? AND is_revoked = 0
-                    ORDER BY last_seen_at DESC, device_id DESC
-                    """,
-                    (int(user_id),),
-                )
-            return [dict(row) for row in cursor.fetchall()]
-    except sqlite3.Error as e:
-        logging.error(f"Не удалось получить устройства подписки пользователя {user_id}: {e}")
-        return []
-
-def revoke_subscription_device(user_id: int, device_id: int) -> bool:
-    try:
-        with sqlite3.connect(DB_FILE) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE subscription_devices SET is_revoked = 1 WHERE device_id = ? AND user_id = ?",
-                (int(device_id), int(user_id)),
-            )
-            conn.commit()
-            return cursor.rowcount > 0
-    except sqlite3.Error as e:
-        logging.error(f"Не удалось отключить устройство {device_id} пользователя {user_id}: {e}")
-        return False
-
-def is_subscription_device_revoked(user_id: int, device_fingerprint: str) -> bool:
-    try:
-        with sqlite3.connect(DB_FILE) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT is_revoked
-                FROM subscription_devices
-                WHERE user_id = ? AND device_fingerprint = ?
-                """,
-                (int(user_id), str(device_fingerprint)),
-            )
-            row = cursor.fetchone()
-            return bool(row and int(row[0] or 0) == 1)
-    except sqlite3.Error as e:
-        logging.error(f"Не удалось проверить статус устройства пользователя {user_id}: {e}")
-        return False
 
 def register_user_if_not_exists(telegram_id: int, username: str, referrer_id):
     try:

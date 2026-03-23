@@ -47,7 +47,7 @@ from shop_bot.data_manager.database import (
     get_user, get_key_by_email, get_host, get_or_create_user_subscription_uuid, reset_user_state,
     move_host_order, update_host_is_expired, get_user_device_limit, adjust_user_device_limit,
     get_all_traffic_packages, create_traffic_package, update_traffic_package, delete_traffic_package,
-    upsert_subscription_device, is_subscription_device_revoked)
+)
 
 
 _bot_controller = None
@@ -469,64 +469,6 @@ def create_webhook_app(bot_controller_instance):
             logger.warning(f"Синхронизация клиентов по всем хостам не выполнена для user={user_id}: {e}")
             return keys
 
-    def _subscription_request_ip() -> str:
-        forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-        return forwarded or (request.remote_addr or "").strip() or "unknown"
-
-    def _subscription_device_name(user_agent: str) -> str:
-        ua = (user_agent or "").lower()
-        app = "Клиент"
-        if "happ" in ua:
-            app = "Happ"
-        elif "hiddify" in ua:
-            app = "Hiddify"
-        elif "shadowrocket" in ua:
-            app = "Shadowrocket"
-        elif "streisand" in ua:
-            app = "Streisand"
-        elif "v2rayng" in ua:
-            app = "v2rayNG"
-        elif "chrome" in ua:
-            app = "Chrome"
-        elif "safari" in ua and "chrome" not in ua:
-            app = "Safari"
-
-        platform = "Устройство"
-        if "android" in ua:
-            platform = "Android"
-        elif "iphone" in ua or "ipad" in ua or "ios" in ua:
-            platform = "iOS"
-        elif "mac os" in ua or "macintosh" in ua:
-            platform = "macOS"
-        elif "windows" in ua:
-            platform = "Windows"
-        elif "linux" in ua:
-            platform = "Linux"
-        return f"{app} {platform}"
-
-    def _subscription_device_fingerprint(user_id: int) -> tuple[str, str, str]:
-        user_agent = (request.headers.get("User-Agent") or "").strip()
-        ip_addr = _subscription_request_ip()
-        # Do not bind device identity to IP: mobile users often change networks,
-        # and subscription import must keep working even when the IP changes.
-        raw = f"{int(user_id)}|{user_agent or 'unknown-client'}"
-        fingerprint = hashlib.sha1(raw.encode("utf-8")).hexdigest()
-        return fingerprint, user_agent, ip_addr
-
-    def _register_subscription_device(user_id: int) -> bool:
-        fingerprint, user_agent, ip_addr = _subscription_device_fingerprint(user_id)
-        if is_subscription_device_revoked(user_id, fingerprint):
-            return False
-        device_name = _subscription_device_name(user_agent)
-        upsert_subscription_device(
-            user_id=user_id,
-            device_fingerprint=fingerprint,
-            device_name=device_name,
-            user_agent=user_agent,
-            last_ip=ip_addr,
-        )
-        return True
-
     def _serve_unified_subscription(token: str):
         # Allow tokens copied as "<token>" from docs/messages.
         token = (token or "").strip().strip("<>")
@@ -540,9 +482,6 @@ def create_webhook_app(bot_controller_instance):
             user_id = xui_api.resolve_user_id_by_legacy_sub_token(token, all_keys)
             if user_id is None:
                 return Response("Invalid subscription token", status=403, mimetype="text/plain")
-
-        if not _register_subscription_device(int(user_id)):
-            return Response("Device access revoked", status=403, mimetype="text/plain")
 
         keys = get_keys_for_user(user_id) or []
         # Create/ensure clients in inbound on all panels first, then collect VLESS.
@@ -752,12 +691,6 @@ def create_webhook_app(bot_controller_instance):
         token = (request.args.get("token") or "").strip().strip("<>")
         if not token:
             return Response("Missing token", status=400, mimetype="text/plain")
-        user_id = xui_api.parse_unified_subscription_token(token)
-        if user_id is None:
-            user_id = xui_api.resolve_user_id_by_persistent_subscription_token(token)
-        if user_id is not None and not _register_subscription_device(int(user_id)):
-            return Response("Device access revoked", status=403, mimetype="text/plain")
-
         sub_url = f"https://q1.servernux.com:8443/sub/{token}"
         crypto_link, error = _request_happ_crypto_url(sub_url)
         if not crypto_link:
@@ -768,11 +701,6 @@ def create_webhook_app(bot_controller_instance):
     @flask_app.route('/activate/<token>', methods=['GET'])
     def activate_subscription_route(token: str):
         clean_token = (token or "").strip().strip("<>")
-        user_id = xui_api.parse_unified_subscription_token(clean_token)
-        if user_id is None:
-            user_id = xui_api.resolve_user_id_by_persistent_subscription_token(clean_token)
-        if user_id is not None and not _register_subscription_device(int(user_id)):
-            return Response("Device access revoked", status=403, mimetype="text/plain")
         sub_url = f"https://q1.servernux.com:8443/sub/{clean_token}"
         crypto_link, error = _request_happ_crypto_url(sub_url)
         if not crypto_link:

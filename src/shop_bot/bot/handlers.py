@@ -67,8 +67,6 @@ from shop_bot.data_manager.database import (
     create_traffic_package_purchase,
     get_total_extra_traffic_gb_for_user,
     get_extra_traffic_gb_for_user_key,
-    get_user_subscription_devices,
-    revoke_subscription_device,
 )
 from shop_bot.config import (
     CHOOSE_PLAN_MESSAGE,
@@ -1001,60 +999,6 @@ def get_user_router() -> Router:
             text,
             reply_markup=keyboards.create_subscription_traffic_keyboard()
         )
-
-    @user_router.callback_query(F.data == "subscription_devices")
-    @registration_required
-    async def subscription_devices_handler(callback: types.CallbackQuery):
-        await callback.answer()
-        devices = get_user_subscription_devices(callback.from_user.id) or []
-        if not devices:
-            text = (
-                "📱 <b>Устройства</b>\n\n"
-                "Устройства ещё не обнаружены.\n"
-                "Откройте подписку через Happ или обновите subscription ссылку, и устройство появится в списке."
-            )
-            reply_markup = keyboards.create_subscription_devices_keyboard()
-        else:
-            lines = []
-            for idx, device in enumerate(devices, start=1):
-                name = str(device.get("device_name") or f"Устройство #{idx}")
-                last_seen = str(device.get("last_seen_at") or "—")
-                lines.append(f"{idx}. {name}\n   Последняя активность: {last_seen}")
-            text = "📱 <b>Устройства</b>\n\n" + "\n\n".join(lines)
-            reply_markup = keyboards.create_subscription_devices_list_keyboard(devices)
-        await _safe_edit_or_send(
-            callback.message,
-            text,
-            reply_markup=reply_markup
-        )
-
-    @user_router.callback_query(F.data.startswith("subscription_device_delete:"))
-    @registration_required
-    async def subscription_device_delete_handler(callback: types.CallbackQuery):
-        await callback.answer()
-        try:
-            device_id = int((callback.data or "").split(":", 1)[1])
-        except Exception:
-            await _safe_edit_or_send(callback.message, "❌ Не удалось определить устройство.")
-            return
-        ok = revoke_subscription_device(callback.from_user.id, device_id)
-        devices = get_user_subscription_devices(callback.from_user.id) or []
-        if not devices:
-            text = (
-                ("✅ Устройство удалено из доступа к подписке.\n\n" if ok else "❌ Не удалось удалить устройство.\n\n")
-                + "📱 <b>Устройства</b>\n\nУстройств больше не найдено."
-            )
-            reply_markup = keyboards.create_subscription_devices_keyboard()
-        else:
-            lines = []
-            for idx, device in enumerate(devices, start=1):
-                name = str(device.get("device_name") or f"Устройство #{idx}")
-                last_seen = str(device.get("last_seen_at") or "—")
-                lines.append(f"{idx}. {name}\n   Последняя активность: {last_seen}")
-            prefix = "✅ Устройство удалено из доступа к подписке.\n\n" if ok else "❌ Не удалось удалить устройство.\n\n"
-            text = prefix + "📱 <b>Устройства</b>\n\n" + "\n\n".join(lines)
-            reply_markup = keyboards.create_subscription_devices_list_keyboard(devices)
-        await _safe_edit_or_send(callback.message, text, reply_markup=reply_markup)
 
     @user_router.callback_query(F.data == "subscription_buy_traffic")
     @registration_required

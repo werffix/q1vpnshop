@@ -1008,7 +1008,6 @@ def create_subscription_management_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🔄 Продлить подписку", callback_data="buy_traffic_start")
     builder.button(text="📊 Информация о трафике", callback_data="subscription_traffic_info")
-    builder.button(text="📱 Устройства", callback_data="subscription_devices")
     builder.button(text="⬅️ Назад", callback_data="show_profile")
     builder.adjust(1)
     return builder.as_markup()
@@ -1033,25 +1032,6 @@ def create_traffic_packages_keyboard(packages: list[dict]) -> InlineKeyboardMark
             callback_data=f"trafficpack:{int(package['package_id'])}"
         )
     builder.button(text="⬅️ Назад", callback_data="subscription_traffic_info")
-    builder.adjust(1)
-    return builder.as_markup()
-
-def create_subscription_devices_keyboard() -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text="⬅️ Назад", callback_data="manage_subscription")
-    builder.adjust(1)
-    return builder.as_markup()
-
-def create_subscription_devices_list_keyboard(devices: list[dict]) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    for device in devices:
-        try:
-            device_id = int(device.get("device_id"))
-        except Exception:
-            continue
-        name = str(device.get("device_name") or f"Устройство #{device_id}")
-        builder.button(text=f"🗑 Удалить: {name}", callback_data=f"subscription_device_delete:{device_id}")
-    builder.button(text="⬅️ Назад", callback_data="manage_subscription")
     builder.adjust(1)
     return builder.as_markup()
 
