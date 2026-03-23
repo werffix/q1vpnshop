@@ -1042,6 +1042,19 @@ def create_subscription_devices_keyboard() -> InlineKeyboardMarkup:
     builder.adjust(1)
     return builder.as_markup()
 
+def create_subscription_devices_list_keyboard(devices: list[dict]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for device in devices:
+        try:
+            device_id = int(device.get("device_id"))
+        except Exception:
+            continue
+        name = str(device.get("device_name") or f"Устройство #{device_id}")
+        builder.button(text=f"🗑 Удалить: {name}", callback_data=f"subscription_device_delete:{device_id}")
+    builder.button(text="⬅️ Назад", callback_data="manage_subscription")
+    builder.adjust(1)
+    return builder.as_markup()
+
 def create_connect_devices_keyboard_with_back_only() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="📱 Android", callback_data="howto_android")

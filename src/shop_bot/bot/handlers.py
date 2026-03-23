@@ -65,6 +65,9 @@ from shop_bot.data_manager.database import (
     get_active_traffic_packages,
     get_traffic_package_by_id,
     create_traffic_package_purchase,
+    get_total_extra_traffic_gb_for_user,
+    get_user_subscription_devices,
+    revoke_subscription_device,
 )
 from shop_bot.config import (
     CHOOSE_PLAN_MESSAGE,
@@ -260,7 +263,7 @@ async def _get_live_traffic_stats_for_key(key_data: dict) -> dict | None:
         return None
     return {"up": up, "down": down, "total": total}
 
-async def _build_subscription_traffic_summary(user_keys: list[dict]) -> dict:
+async def _build_subscription_traffic_summary(user_keys: list[dict], user_id: int | None = None) -> dict:
     subscription_keys = user_keys or []
     traffic_tasks = [_get_live_traffic_stats_for_key(k) for k in subscription_keys]
     traffic_results = await asyncio.gather(*traffic_tasks, return_exceptions=True) if traffic_tasks else []
@@ -317,11 +320,19 @@ async def _build_subscription_traffic_summary(user_keys: list[dict]) -> dict:
     else:
         whitelist_usage_text = "0 Б / Безлимит"
 
+    extra_traffic_gb = 0.0
+    if user_id is not None:
+        try:
+            extra_traffic_gb = float(get_total_extra_traffic_gb_for_user(int(user_id)) or 0.0)
+        except Exception:
+            extra_traffic_gb = 0.0
+
     return {
         "main_usage_text": main_usage_text,
         "whitelist_usage_text": whitelist_usage_text,
         "whitelist_used_text": format_traffic(whitelist_used),
         "whitelist_total_text": (format_traffic(whitelist_total) if whitelist_total > 0 else "Безлимит"),
+        "extra_traffic_text": (f"{extra_traffic_gb:.0f} ГБ" if extra_traffic_gb > 0 else "0 ГБ"),
         "reset_text": "1 числа каждого месяца",
     }
 
@@ -480,6 +491,7 @@ async def _apply_traffic_package_to_user(user_id: int, package_gb: float) -> tup
     keys = get_user_keys(user_id) or []
     processed = 0
     success = 0
+    purchase_token = uuid.uuid4().hex
     seen: set[tuple[str, str]] = set()
     for key in keys:
         host_name = (key.get("host_name") or "").strip()
@@ -506,7 +518,7 @@ async def _apply_traffic_package_to_user(user_id: int, package_gb: float) -> tup
             ok = False
         if ok:
             try:
-                create_traffic_package_purchase(user_id, host_name, email, package_gb)
+                create_traffic_package_purchase(user_id, host_name, email, package_gb, purchase_token=purchase_token)
             except Exception:
                 pass
             success += 1
@@ -907,10 +919,9 @@ def get_user_router() -> Router:
                 "У вас нет активных подписок."
             )
         else:
-            traffic_summary = await _build_subscription_traffic_summary(user_keys or active_keys)
+            traffic_summary = await _build_subscription_traffic_summary(user_keys or active_keys, user_id=user_id)
             main_usage_text = traffic_summary["main_usage_text"]
             whitelist_usage_text = traffic_summary["whitelist_usage_text"]
-
             final_text = (
                 f"👤 <b>Профиль:</b> {username}\n\n"
                 f"{vpn_status_line} <b>Статус VPN:</b>\n"
@@ -962,13 +973,14 @@ def get_user_router() -> Router:
                 reply_markup=keyboards.create_profile_keyboard(show_renew_button=False)
             )
             return
-        traffic_summary = await _build_subscription_traffic_summary(user_keys or active_keys)
+        traffic_summary = await _build_subscription_traffic_summary(user_keys or active_keys, user_id=callback.from_user.id)
         text = (
             "📊 <b>Информация о трафике</b>\n\n"
             "🔎 <b>Текущее использование:</b>\n"
             f"├ Использовано: {traffic_summary['whitelist_used_text']}\n"
             f"├ Лимит по подписке: {traffic_summary['whitelist_total_text']}\n"
             f"├ Cброс трафика: {traffic_summary['reset_text']}\n"
+            f"└ Докуплено: {traffic_summary['extra_traffic_text']}\n"
         )
         await _safe_edit_or_send(
             callback.message,
@@ -980,16 +992,55 @@ def get_user_router() -> Router:
     @registration_required
     async def subscription_devices_handler(callback: types.CallbackQuery):
         await callback.answer()
-        text = (
-            "📱 <b>Устройства</b>\n\n"
-            "Сейчас бот не хранит человекочитаемые названия устройств из Happ и других клиентов.\n"
-            "Чтобы показывать и удалять именно устройства, нужно отдельно внедрить сохранение device-id на стороне бота."
-        )
+        devices = get_user_subscription_devices(callback.from_user.id) or []
+        if not devices:
+            text = (
+                "📱 <b>Устройства</b>\n\n"
+                "Устройства ещё не обнаружены.\n"
+                "Откройте подписку через Happ или обновите subscription ссылку, и устройство появится в списке."
+            )
+            reply_markup = keyboards.create_subscription_devices_keyboard()
+        else:
+            lines = []
+            for idx, device in enumerate(devices, start=1):
+                name = str(device.get("device_name") or f"Устройство #{idx}")
+                last_seen = str(device.get("last_seen_at") or "—")
+                lines.append(f"{idx}. {name}\n   Последняя активность: {last_seen}")
+            text = "📱 <b>Устройства</b>\n\n" + "\n\n".join(lines)
+            reply_markup = keyboards.create_subscription_devices_list_keyboard(devices)
         await _safe_edit_or_send(
             callback.message,
             text,
-            reply_markup=keyboards.create_subscription_devices_keyboard()
+            reply_markup=reply_markup
         )
+
+    @user_router.callback_query(F.data.startswith("subscription_device_delete:"))
+    @registration_required
+    async def subscription_device_delete_handler(callback: types.CallbackQuery):
+        await callback.answer()
+        try:
+            device_id = int((callback.data or "").split(":", 1)[1])
+        except Exception:
+            await _safe_edit_or_send(callback.message, "❌ Не удалось определить устройство.")
+            return
+        ok = revoke_subscription_device(callback.from_user.id, device_id)
+        devices = get_user_subscription_devices(callback.from_user.id) or []
+        if not devices:
+            text = (
+                ("✅ Устройство удалено из доступа к подписке.\n\n" if ok else "❌ Не удалось удалить устройство.\n\n")
+                + "📱 <b>Устройства</b>\n\nУстройств больше не найдено."
+            )
+            reply_markup = keyboards.create_subscription_devices_keyboard()
+        else:
+            lines = []
+            for idx, device in enumerate(devices, start=1):
+                name = str(device.get("device_name") or f"Устройство #{idx}")
+                last_seen = str(device.get("last_seen_at") or "—")
+                lines.append(f"{idx}. {name}\n   Последняя активность: {last_seen}")
+            prefix = "✅ Устройство удалено из доступа к подписке.\n\n" if ok else "❌ Не удалось удалить устройство.\n\n"
+            text = prefix + "📱 <b>Устройства</b>\n\n" + "\n\n".join(lines)
+            reply_markup = keyboards.create_subscription_devices_list_keyboard(devices)
+        await _safe_edit_or_send(callback.message, text, reply_markup=reply_markup)
 
     @user_router.callback_query(F.data == "subscription_buy_traffic")
     @registration_required
