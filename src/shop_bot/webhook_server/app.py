@@ -507,7 +507,9 @@ def create_webhook_app(bot_controller_instance):
     def _subscription_device_fingerprint(user_id: int) -> tuple[str, str, str]:
         user_agent = (request.headers.get("User-Agent") or "").strip()
         ip_addr = _subscription_request_ip()
-        raw = f"{int(user_id)}|{user_agent}|{ip_addr}"
+        # Do not bind device identity to IP: mobile users often change networks,
+        # and subscription import must keep working even when the IP changes.
+        raw = f"{int(user_id)}|{user_agent or 'unknown-client'}"
         fingerprint = hashlib.sha1(raw.encode("utf-8")).hexdigest()
         return fingerprint, user_agent, ip_addr
 
