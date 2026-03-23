@@ -718,7 +718,6 @@ def create_webhook_app(bot_controller_instance):
             response.headers["support-url"] = "https://t.me/q1vpn_bot"
             response.headers["profile-update-interval"] = "3"
             response.headers["update-interval"] = "3"
-            response.headers["subscription-userinfo"] = "upload=0; download=0; total=0; expire=0"
             response.headers["profile-description"] = _header_utf8_via_latin1(
                 "Продлите подписку в боте - @q1vpn_bot"
             )
@@ -736,21 +735,6 @@ def create_webhook_app(bot_controller_instance):
         # Hint clients (Happ/v2ray-like) to auto-refresh profile every 3 hours.
         response.headers["profile-update-interval"] = "3"
         response.headers["update-interval"] = "3"
-        expire_value = max(expiry_candidates) if expiry_candidates else 0
-        used_total = max(upload_total, 0) + max(download_total, 0)
-        # Convention for many subscription clients:
-        # total=0 means unlimited traffic.
-        # If panel quotas are absent/zero, expose unlimited explicitly.
-        if quota_total <= 0:
-            quota_for_header = 0
-        else:
-            quota_for_header = max(quota_total, used_total, 1)
-        response.headers["subscription-userinfo"] = (
-            f"upload={max(upload_total, 0)}; "
-            f"download={max(download_total, 0)}; "
-            f"total={quota_for_header}; "
-            f"expire={expire_value}"
-        )
         return response
 
     @flask_app.route('/sub/<token>', methods=['GET'])

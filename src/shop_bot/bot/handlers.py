@@ -296,27 +296,25 @@ async def _build_subscription_traffic_summary(user_keys: list[dict], user_id: in
         down = max(int(result.get("down") or 0), 0)
         total = max(int(result.get("total") or 0), 0)
         used = up + down
+        extra_for_key_gb = 0.0
+        if user_id is not None:
+            try:
+                extra_for_key_gb = float(
+                    get_extra_traffic_gb_for_user_key(
+                        int(user_id),
+                        str(host_name or ""),
+                        str(key_data.get("key_email") or ""),
+                    ) or 0.0
+                )
+            except Exception:
+                extra_for_key_gb = 0.0
 
         if total > 0 or host_limit_gb > 0:
             whitelist_has_source = True
             whitelist_has_ok = True
             whitelist_used += used
-            if total > 0:
-                whitelist_total += total
-            else:
-                extra_for_key_gb = 0.0
-                if user_id is not None:
-                    try:
-                        extra_for_key_gb = float(
-                            get_extra_traffic_gb_for_user_key(
-                                int(user_id),
-                                str(host_name or ""),
-                                str(key_data.get("key_email") or ""),
-                            ) or 0.0
-                        )
-                    except Exception:
-                        extra_for_key_gb = 0.0
-                whitelist_total += int((host_limit_gb + extra_for_key_gb) * (1024 ** 3))
+            expected_total = int((host_limit_gb + extra_for_key_gb) * (1024 ** 3)) if host_limit_gb > 0 else 0
+            whitelist_total += max(total, expected_total)
         else:
             main_has_source = True
             main_has_ok = True
