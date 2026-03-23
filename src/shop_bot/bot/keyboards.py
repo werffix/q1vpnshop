@@ -697,14 +697,16 @@ def create_payment_method_keyboard(
     main_balance: float | None = None,
     price: float | None = None,
     has_promo_applied: bool | None = None,
+    allow_promo: bool = True,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     # Промокод: ввести/убрать
-    if has_promo_applied:
-        builder.button(text="❌ Убрать промокод", callback_data="remove_promo_code")
-    else:
-        builder.button(text="🎟️ Ввести промокод", callback_data="enter_promo_code")
+    if allow_promo:
+        if has_promo_applied:
+            builder.button(text="❌ Убрать промокод", callback_data="remove_promo_code")
+        else:
+            builder.button(text="🎟️ Ввести промокод", callback_data="enter_promo_code")
 
     # Кнопки оплаты с балансов (если разрешено/достаточно средств)
     if show_balance:
@@ -972,6 +974,8 @@ def create_profile_keyboard(show_renew_button: bool = True) -> InlineKeyboardMar
             text=("🔌 Подключиться" if show_renew_button else "💳 Купить подписку"),
             callback_data=("show_connect_menu" if show_renew_button else "buy_new_key")
         )
+        if show_renew_button:
+            builder.button(text="⚙️ Управление подпиской", callback_data="manage_subscription")
         for row in kb.inline_keyboard:
             filtered = [
                 btn for btn in row
@@ -979,28 +983,62 @@ def create_profile_keyboard(show_renew_button: bool = True) -> InlineKeyboardMar
                     "profile_subscription_link",
                     "show_connect_menu",
                     "buy_new_key",
-                    "buy_traffic_start" if not show_renew_button else "__never__",
+                    "buy_traffic_start",
+                    "manage_subscription",
                 }
             ]
             if filtered:
                 builder.row(*filtered)
-        if has_traffic_button and show_renew_button:
-            return builder.as_markup()
-        if not has_traffic_button and show_renew_button:
-            builder.button(text="🔄 Продлить подписку", callback_data="buy_traffic_start")
         builder.adjust(1)
         return builder.as_markup()
 
     builder = InlineKeyboardBuilder()
     if show_renew_button:
         builder.button(text="🔌 Подключиться", callback_data="show_connect_menu")
+        builder.button(text="⚙️ Управление подпиской", callback_data="manage_subscription")
     else:
         builder.button(text="💳 Купить подписку", callback_data="buy_new_key")
-    if show_renew_button:
-        builder.button(text="🔄 Продлить подписку", callback_data="buy_traffic_start")
     builder.button(text=(get_setting("btn_top_up") or "➕ Пополнить баланс"), callback_data="top_up_start")
     builder.button(text=(get_setting("btn_referral") or "🤝 Реферальная программа"), callback_data="show_referral_program")
     builder.button(text=(get_setting("btn_back_to_menu") or "⬅️ Назад в меню"), callback_data="back_to_main_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def create_subscription_management_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Продлить подписку", callback_data="buy_traffic_start")
+    builder.button(text="📊 Информация о трафике", callback_data="subscription_traffic_info")
+    builder.button(text="📱 Устройства", callback_data="subscription_devices")
+    builder.button(text="⬅️ Назад", callback_data="show_profile")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def create_subscription_traffic_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Докупить трафик", callback_data="subscription_buy_traffic")
+    builder.button(text="⬅️ Назад", callback_data="manage_subscription")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def create_traffic_packages_keyboard(packages: list[dict]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for package in packages:
+        try:
+            gb = float(package.get("package_gb") or 0)
+            price = float(package.get("price") or 0)
+        except Exception:
+            continue
+        builder.button(
+            text=f"{gb:.0f} ГБ - {price:.0f} RUB",
+            callback_data=f"trafficpack:{int(package['package_id'])}"
+        )
+    builder.button(text="⬅️ Назад", callback_data="subscription_traffic_info")
+    builder.adjust(1)
+    return builder.as_markup()
+
+def create_subscription_devices_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="⬅️ Назад", callback_data="manage_subscription")
     builder.adjust(1)
     return builder.as_markup()
 

@@ -45,7 +45,8 @@ from shop_bot.data_manager.database import (
     get_all_keys, get_keys_for_user, get_key_by_id, delete_key_by_id, update_key_comment, update_key_info,
     add_new_key, get_balance, adjust_user_balance, get_referrals_for_user,
     get_user, get_key_by_email, get_host, get_or_create_user_subscription_uuid, reset_user_state,
-    move_host_order, update_host_is_expired, get_user_device_limit, adjust_user_device_limit)
+    move_host_order, update_host_is_expired, get_user_device_limit, adjust_user_device_limit,
+    get_all_traffic_packages, create_traffic_package, update_traffic_package, delete_traffic_package)
 
 
 _bot_controller = None
@@ -2088,6 +2089,7 @@ def create_webhook_app(bot_controller_instance):
         current_settings = get_all_settings()
         hosts = get_all_hosts()
         plans = get_all_plans()
+        traffic_packages = get_all_traffic_packages()
         promos = database.list_promo_codes(include_inactive=True) or []
         for host in hosts:
             host['plans'] = get_plans_for_host(host['host_name'])
@@ -2116,7 +2118,16 @@ def create_webhook_app(bot_controller_instance):
             backups = []
 
         common_data = get_common_template_data()
-        return render_template('settings.html', settings=current_settings, hosts=hosts, plans=plans, promos=promos, backups=backups, **common_data)
+        return render_template(
+            'settings.html',
+            settings=current_settings,
+            hosts=hosts,
+            plans=plans,
+            traffic_packages=traffic_packages,
+            promos=promos,
+            backups=backups,
+            **common_data
+        )
 
     @flask_app.route('/settings/promo/create', methods=['POST'])
     @login_required
@@ -2682,6 +2693,44 @@ def create_webhook_app(bot_controller_instance):
         flash('Настройки видимости тарифа обновлены.' if ok else 'Не удалось обновить видимость тарифа.', 'success' if ok else 'danger')
         return redirect(url_for('settings_page', tab='plans'))
 
+    @flask_app.route('/add-traffic-package', methods=['POST'])
+    @login_required
+    def add_traffic_package_route():
+        try:
+            package_gb = float(request.form.get('package_gb', '0'))
+            price = float(request.form.get('price', '0'))
+        except Exception:
+            flash('Некорректные значения пакета трафика.', 'danger')
+            return redirect(url_for('settings_page', tab='plans'))
+        if package_gb <= 0 or price < 0:
+            flash('Укажите корректные значения ГБ и цены.', 'danger')
+            return redirect(url_for('settings_page', tab='plans'))
+        ok = create_traffic_package(package_gb=package_gb, price=price, is_active=True)
+        flash('Пакет трафика добавлен.' if ok else 'Не удалось добавить пакет трафика.', 'success' if ok else 'danger')
+        return redirect(url_for('settings_page', tab='plans'))
+
+    @flask_app.route('/update-traffic-package/<int:package_id>', methods=['POST'])
+    @login_required
+    def update_traffic_package_route(package_id: int):
+        try:
+            package_gb = float(request.form.get('package_gb', '0'))
+            price = float(request.form.get('price', '0'))
+            sort_order = int(request.form.get('sort_order', '0') or 0)
+            is_active = request.form.get('is_active') == 'on'
+        except Exception:
+            flash('Некорректные значения пакета трафика.', 'danger')
+            return redirect(url_for('settings_page', tab='plans'))
+        ok = update_traffic_package(package_id, package_gb, price, is_active, sort_order)
+        flash('Пакет трафика обновлён.' if ok else 'Не удалось обновить пакет трафика.', 'success' if ok else 'danger')
+        return redirect(url_for('settings_page', tab='plans'))
+
+    @flask_app.route('/delete-traffic-package/<int:package_id>', methods=['POST'])
+    @login_required
+    def delete_traffic_package_route(package_id: int):
+        ok = delete_traffic_package(package_id)
+        flash('Пакет трафика удалён.' if ok else 'Не удалось удалить пакет трафика.', 'success' if ok else 'danger')
+        return redirect(url_for('settings_page', tab='plans'))
+
     @csrf.exempt
     @flask_app.route('/yookassa-webhook', methods=['POST'])
     def yookassa_webhook_handler():
@@ -2719,24 +2768,16 @@ def create_webhook_app(bot_controller_instance):
                     logger.warning("CryptoBot вебхук: Получен оплаченный invoice, но payload пустой.")
                     return 'OK', 200
 
-                parts = payload_string.split(':')
-                if len(parts) < 9:
-                    logger.error(f"CryptoBot вебхук: некорректный формат payload: {payload_string}")
+                metadata = find_and_complete_pending_transaction(
+                    payment_id=payload_string,
+                    amount_rub=None,
+                    payment_method="CryptoBot",
+                    currency_name="USDT",
+                    amount_currency=None,
+                )
+                if not metadata:
+                    logger.error(f"CryptoBot вебхук: не удалось завершить pending transaction '{payload_string}'")
                     return 'Error', 400
-
-                metadata = {
-                    "user_id": parts[0],
-                    "months": parts[1],
-                    "price": parts[2],
-                    "action": parts[3],
-                    "key_id": parts[4],
-                    "host_name": parts[5],
-                    "plan_id": parts[6],
-                    "customer_email": parts[7] if parts[7] != 'None' else None,
-                    "payment_method": parts[8],
-                    # Дополнительное поле promo_code поддерживается, если присутствует 10‑й элемент
-                    "promo_code": (parts[9] if len(parts) > 9 and parts[9] else None),
-                }
                 
                 bot = _bot_controller.get_bot_instance()
                 loop = current_app.config.get('EVENT_LOOP')

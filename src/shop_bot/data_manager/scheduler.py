@@ -395,6 +395,7 @@ async def _maybe_run_monthly_traffic_reset():
 
     total_clients = 0
     reset_clients = 0
+    reverted_limits = 0
     logger.info(f"Scheduler: Запускаю ежемесячный сброс трафика (дата: {now.strftime('%Y-%m-%d')})...")
     for host in hosts:
         host_name = str(host.get("host_name") or "").strip()
@@ -407,9 +408,44 @@ async def _maybe_run_monthly_traffic_reset():
         except Exception as e:
             logger.error(f"Scheduler: Ошибка ежемесячного сброса трафика на хосте '{host_name}': {e}", exc_info=True)
 
+        try:
+            base_limit_gb = xui_api.resolve_host_client_traffic_limit_gb(host)
+            if base_limit_gb in (None, "", "null"):
+                continue
+            keys = database.get_keys_for_host(host_name) or []
+            for key in keys:
+                expiry_raw = key.get("expiry_date")
+                if not expiry_raw:
+                    continue
+                try:
+                    expiry_dt = datetime.fromisoformat(str(expiry_raw))
+                except Exception:
+                    continue
+                if expiry_dt <= now:
+                    continue
+                key_email = (key.get("key_email") or "").strip()
+                if not key_email:
+                    continue
+                try:
+                    ok = await xui_api.set_client_traffic_limit_on_host(host_name, key_email, base_limit_gb)
+                except Exception:
+                    ok = False
+                if ok:
+                    reverted_limits += 1
+        except Exception as e:
+            logger.error(f"Scheduler: Ошибка восстановления базовых лимитов трафика на хосте '{host_name}': {e}", exc_info=True)
+
+    cleared_packages = 0
+    try:
+        cleared_packages = database.clear_all_traffic_package_purchases()
+    except Exception as e:
+        logger.error(f"Scheduler: Ошибка очистки временных пакетов трафика: {e}", exc_info=True)
+
     logger.info(
         f"Scheduler: Ежемесячный сброс трафика завершён. "
-        f"Сброшено клиентов: {reset_clients}/{total_clients}."
+        f"Сброшено клиентов: {reset_clients}/{total_clients}. "
+        f"Восстановлено базовых лимитов: {reverted_limits}. "
+        f"Сгорело пакетов трафика: {cleared_packages}."
     )
     database.update_setting(MONTHLY_TRAFFIC_RESET_KEY, current_ym)
 

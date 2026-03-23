@@ -111,7 +111,27 @@ def initialize_db():
                     allowed_user_ids TEXT,
                     FOREIGN KEY (host_name) REFERENCES xui_hosts (host_name)
                 )
-            ''')            
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS traffic_packages (
+                    package_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    package_gb REAL NOT NULL,
+                    price REAL NOT NULL,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS traffic_package_purchases (
+                    purchase_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    host_name TEXT NOT NULL,
+                    key_email TEXT NOT NULL,
+                    extra_gb REAL NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS support_tickets (
                     ticket_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1964,6 +1984,128 @@ def update_plan_visibility(plan_id: int, visible_for_all: bool, allowed_user_ids
     except sqlite3.Error as e:
         logging.error(f"Не удалось обновить видимость плана {plan_id}: {e}")
         return False
+
+def create_traffic_package(package_gb: float, price: float, is_active: bool = True, sort_order: int | None = None) -> bool:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            if sort_order is None:
+                cursor.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM traffic_packages")
+                sort_order = int(cursor.fetchone()[0] or 1)
+            cursor.execute(
+                """
+                INSERT INTO traffic_packages (package_gb, price, is_active, sort_order)
+                VALUES (?, ?, ?, ?)
+                """,
+                (float(package_gb), float(price), 1 if is_active else 0, int(sort_order)),
+            )
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Не удалось создать пакет трафика: {e}")
+        return False
+
+def get_all_traffic_packages() -> list[dict]:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM traffic_packages
+                ORDER BY sort_order, package_gb, package_id
+                """
+            )
+            return [dict(row) for row in cursor.fetchall()]
+    except sqlite3.Error as e:
+        logging.error(f"Не удалось получить пакеты трафика: {e}")
+        return []
+
+def get_active_traffic_packages() -> list[dict]:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM traffic_packages
+                WHERE is_active = 1
+                ORDER BY sort_order, package_gb, package_id
+                """
+            )
+            return [dict(row) for row in cursor.fetchall()]
+    except sqlite3.Error as e:
+        logging.error(f"Не удалось получить активные пакеты трафика: {e}")
+        return []
+
+def get_traffic_package_by_id(package_id: int) -> dict | None:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM traffic_packages WHERE package_id = ?", (package_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    except sqlite3.Error as e:
+        logging.error(f"Не удалось получить пакет трафика {package_id}: {e}")
+        return None
+
+def update_traffic_package(package_id: int, package_gb: float, price: float, is_active: bool, sort_order: int = 0) -> bool:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE traffic_packages
+                SET package_gb = ?, price = ?, is_active = ?, sort_order = ?
+                WHERE package_id = ?
+                """,
+                (float(package_gb), float(price), 1 if is_active else 0, int(sort_order), int(package_id)),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logging.error(f"Не удалось обновить пакет трафика {package_id}: {e}")
+        return False
+
+def delete_traffic_package(package_id: int) -> bool:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM traffic_packages WHERE package_id = ?", (int(package_id),))
+            conn.commit()
+            return cursor.rowcount > 0
+    except sqlite3.Error as e:
+        logging.error(f"Не удалось удалить пакет трафика {package_id}: {e}")
+        return False
+
+def create_traffic_package_purchase(user_id: int, host_name: str, key_email: str, extra_gb: float) -> bool:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO traffic_package_purchases (user_id, host_name, key_email, extra_gb)
+                VALUES (?, ?, ?, ?)
+                """,
+                (int(user_id), str(host_name), str(key_email), float(extra_gb)),
+            )
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Не удалось сохранить покупку пакета трафика для пользователя {user_id}: {e}")
+        return False
+
+def clear_all_traffic_package_purchases() -> int:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM traffic_package_purchases")
+            conn.commit()
+            return int(cursor.rowcount or 0)
+    except sqlite3.Error as e:
+        logging.error(f"Не удалось очистить покупки пакетов трафика: {e}")
+        return 0
 
 def register_user_if_not_exists(telegram_id: int, username: str, referrer_id):
     try:

@@ -62,6 +62,9 @@ from shop_bot.data_manager.database import (
     update_promo_code_status,
     get_admin_ids,
     delete_key_by_id,
+    get_active_traffic_packages,
+    get_traffic_package_by_id,
+    create_traffic_package_purchase,
 )
 from shop_bot.config import (
     CHOOSE_PLAN_MESSAGE,
@@ -257,6 +260,71 @@ async def _get_live_traffic_stats_for_key(key_data: dict) -> dict | None:
         return None
     return {"up": up, "down": down, "total": total}
 
+async def _build_subscription_traffic_summary(user_keys: list[dict]) -> dict:
+    subscription_keys = user_keys or []
+    traffic_tasks = [_get_live_traffic_stats_for_key(k) for k in subscription_keys]
+    traffic_results = await asyncio.gather(*traffic_tasks, return_exceptions=True) if traffic_tasks else []
+
+    main_used = 0
+    whitelist_used = 0
+    whitelist_total = 0
+    main_has_source = False
+    main_has_ok = False
+    whitelist_has_source = False
+    whitelist_has_ok = False
+
+    for key_data, result in zip(subscription_keys, traffic_results):
+        host_name = key_data.get("host_name")
+        try:
+            host_data = get_host(host_name)
+        except Exception:
+            host_data = None
+        host_limit_gb = _resolve_host_limit_gb_for_profile(host_data, host_name)
+
+        if isinstance(result, Exception) or not result:
+            if host_limit_gb > 0:
+                whitelist_has_source = True
+            else:
+                main_has_source = True
+            continue
+
+        up = max(int(result.get("up") or 0), 0)
+        down = max(int(result.get("down") or 0), 0)
+        total = max(int(result.get("total") or 0), 0)
+        used = up + down
+
+        if total > 0 or host_limit_gb > 0:
+            whitelist_has_source = True
+            whitelist_has_ok = True
+            whitelist_used += used
+            whitelist_total += (total if total > 0 else int(host_limit_gb * (1024 ** 3)))
+        else:
+            main_has_source = True
+            main_has_ok = True
+            main_used += used
+
+    if main_has_source:
+        main_usage_text = f"{format_traffic(main_used)} / ∞" if main_has_ok else "Недоступно"
+    else:
+        main_usage_text = "0 Б / ∞"
+
+    if whitelist_has_source:
+        if whitelist_has_ok:
+            wl_total_text = format_traffic(whitelist_total) if whitelist_total > 0 else "Безлимит"
+            whitelist_usage_text = f"{format_traffic(whitelist_used)} / {wl_total_text}"
+        else:
+            whitelist_usage_text = "Недоступно"
+    else:
+        whitelist_usage_text = "0 Б / Безлимит"
+
+    return {
+        "main_usage_text": main_usage_text,
+        "whitelist_usage_text": whitelist_usage_text,
+        "whitelist_used_text": format_traffic(whitelist_used),
+        "whitelist_total_text": (format_traffic(whitelist_total) if whitelist_total > 0 else "Безлимит"),
+        "reset_text": "1 числа каждого месяца",
+    }
+
 async def _safe_edit_or_send(
     message: types.Message,
     text: str,
@@ -309,6 +377,152 @@ def _get_primary_host_with_plans(user_id: int | None = None) -> tuple[str | None
             return host_name, plans
     first_name = hosts[0].get("host_name")
     return first_name, (get_plans_for_host(first_name) if first_name else [])
+
+def _checkout_month_word(months: int) -> str:
+    if months % 10 == 1 and months % 100 != 11:
+        return "месяц"
+    if months % 10 in (2, 3, 4) and months % 100 not in (12, 13, 14):
+        return "месяца"
+    return "месяцев"
+
+def _resolve_checkout_context(user_id: int, state_data: dict) -> dict | None:
+    action = (state_data.get("action") or "").strip()
+    if action == "traffic_package":
+        package_id_raw = state_data.get("traffic_package_id")
+        try:
+            package_id = int(package_id_raw)
+        except Exception:
+            return None
+        package = get_traffic_package_by_id(package_id)
+        if not package or int(package.get("is_active") or 0) != 1:
+            return None
+        package_gb = float(package.get("package_gb") or 0)
+        price = Decimal(str(package.get("price") or 0)).quantize(Decimal("0.01"))
+        if package_gb <= 0:
+            return None
+        return {
+            "kind": "traffic_package",
+            "package": package,
+            "package_id": package_id,
+            "package_gb": package_gb,
+            "price": price,
+            "title": f"Пакет трафика {package_gb:.0f} ГБ",
+            "description": f"q1 vpn - пакет трафика {package_gb:.0f} ГБ",
+            "payment_description": f"Пакет трафика {package_gb:.0f} ГБ",
+            "metadata": {
+                "user_id": user_id,
+                "action": "traffic_package",
+                "traffic_package_id": package_id,
+                "traffic_gb": package_gb,
+                "price": float(price),
+                "payment_method": None,
+                "customer_email": state_data.get("customer_email"),
+            },
+        }
+
+    plan_id_raw = state_data.get("plan_id")
+    try:
+        plan_id = int(plan_id_raw)
+    except Exception:
+        return None
+    plan = get_plan_by_id(plan_id)
+    if not plan:
+        return None
+
+    price = Decimal(str(plan['price'])).quantize(Decimal("0.01"))
+    user_data = get_user(user_id)
+    if user_data and user_data.get('referred_by') and user_data.get('total_spent', 0) == 0:
+        try:
+            discount_percentage = Decimal(get_setting("referral_discount") or "0")
+        except Exception:
+            discount_percentage = Decimal("0")
+        if discount_percentage > 0:
+            discount_amount = (price * discount_percentage / 100).quantize(Decimal("0.01"))
+            price = (price - discount_amount).quantize(Decimal("0.01"))
+
+    final_price_from_state = state_data.get('final_price')
+    if final_price_from_state is not None:
+        try:
+            price = Decimal(str(final_price_from_state)).quantize(Decimal("0.01"))
+        except Exception:
+            pass
+    if price < Decimal('0'):
+        price = Decimal('0.00')
+
+    months = int(plan['months'])
+    month_word = _checkout_month_word(months)
+    return {
+        "kind": "subscription",
+        "plan": plan,
+        "plan_id": plan_id,
+        "months": months,
+        "price": price,
+        "title": plan.get("plan_name") or f"{months} {month_word}",
+        "description": f"q1 vpn - {months} {month_word}",
+        "payment_description": f"Подписка на {months} мес.",
+        "metadata": {
+            "user_id": user_id,
+            "months": months,
+            "price": float(price),
+            "action": state_data.get('action'),
+            "key_id": state_data.get('key_id'),
+            "host_name": state_data.get('host_name'),
+            "plan_id": plan_id,
+            "customer_email": state_data.get('customer_email'),
+            "payment_method": None,
+            "promo_code": state_data.get('promo_code'),
+            "promo_discount_percent": state_data.get('promo_discount_percent'),
+            "promo_discount_amount": state_data.get('promo_discount_amount'),
+        },
+    }
+
+async def _apply_traffic_package_to_user(user_id: int, package_gb: float) -> tuple[int, int]:
+    keys = get_user_keys(user_id) or []
+    processed = 0
+    success = 0
+    seen: set[tuple[str, str]] = set()
+    for key in keys:
+        host_name = (key.get("host_name") or "").strip()
+        email = (key.get("key_email") or "").strip()
+        if not host_name or not email:
+            continue
+        host = get_host(host_name)
+        if not host:
+            continue
+        try:
+            host_limit = float(host.get("client_monthly_traffic_gb") or 0)
+        except Exception:
+            host_limit = 0
+        if host_limit <= 0:
+            continue
+        ident = (host_name, email)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        processed += 1
+        try:
+            ok = await xui_api.increase_client_traffic_limit_on_host(host_name, email, package_gb)
+        except Exception:
+            ok = False
+        if ok:
+            try:
+                create_traffic_package_purchase(user_id, host_name, email, package_gb)
+            except Exception:
+                pass
+            success += 1
+    return processed, success
+
+def _checkout_metadata_for_payment(checkout: dict, state_data: dict, payment_method: str, extra: dict | None = None) -> dict:
+    metadata = dict(checkout.get("metadata") or {})
+    metadata["payment_method"] = payment_method
+    metadata["customer_email"] = state_data.get("customer_email")
+    if checkout.get("kind") == "subscription":
+        metadata["promo_code"] = state_data.get("promo_code")
+        metadata["promo_discount_percent"] = state_data.get("promo_discount_percent")
+        metadata["promo_discount_amount"] = state_data.get("promo_discount_amount")
+    if extra:
+        metadata.update(extra)
+    return metadata
 
 async def _remove_expired_hosts_clients(user_id: int):
     expired_hosts = _get_expired_hosts()
@@ -693,62 +907,9 @@ def get_user_router() -> Router:
                 "У вас нет активных подписок."
             )
         else:
-            # Traffic is calculated from subscription #1 keys only using live 3x-ui API stats.
-            subscription_keys = user_keys or active_keys
-            traffic_tasks = [_get_live_traffic_stats_for_key(k) for k in subscription_keys]
-            traffic_results = await asyncio.gather(*traffic_tasks, return_exceptions=True) if traffic_tasks else []
-
-            main_used = 0
-            whitelist_used = 0
-            whitelist_total = 0
-            main_has_source = False
-            main_has_ok = False
-            whitelist_has_source = False
-            whitelist_has_ok = False
-
-            for key_data, result in zip(subscription_keys, traffic_results):
-                host_name = key_data.get("host_name")
-                try:
-                    host_data = get_host(host_name)
-                except Exception:
-                    host_data = None
-                host_limit_gb = _resolve_host_limit_gb_for_profile(host_data, host_name)
-
-                if isinstance(result, Exception) or not result:
-                    if host_limit_gb > 0:
-                        whitelist_has_source = True
-                    else:
-                        main_has_source = True
-                    continue
-
-                up = max(int(result.get("up") or 0), 0)
-                down = max(int(result.get("down") or 0), 0)
-                total = max(int(result.get("total") or 0), 0)
-                used = up + down
-
-                if total > 0 or host_limit_gb > 0:
-                    whitelist_has_source = True
-                    whitelist_has_ok = True
-                    whitelist_used += used
-                    whitelist_total += (total if total > 0 else int(host_limit_gb * (1024 ** 3)))
-                else:
-                    main_has_source = True
-                    main_has_ok = True
-                    main_used += used
-
-            if main_has_source:
-                main_usage_text = f"{format_traffic(main_used)} / ∞" if main_has_ok else "Недоступно"
-            else:
-                main_usage_text = "0 Б / ∞"
-
-            if whitelist_has_source:
-                if whitelist_has_ok:
-                    wl_total_text = format_traffic(whitelist_total) if whitelist_total > 0 else "Безлимит"
-                    whitelist_usage_text = f"{format_traffic(whitelist_used)} / {wl_total_text}"
-                else:
-                    whitelist_usage_text = "Недоступно"
-            else:
-                whitelist_usage_text = "0 Б / Безлимит"
+            traffic_summary = await _build_subscription_traffic_summary(user_keys or active_keys)
+            main_usage_text = traffic_summary["main_usage_text"]
+            whitelist_usage_text = traffic_summary["whitelist_usage_text"]
 
             final_text = (
                 f"👤 <b>Профиль:</b> {username}\n\n"
@@ -766,6 +927,115 @@ def get_user_router() -> Router:
             final_text,
             reply_markup=keyboards.create_profile_keyboard(show_renew_button=bool(active_keys))
         )
+
+    @user_router.callback_query(F.data == "manage_subscription")
+    @registration_required
+    async def manage_subscription_handler(callback: types.CallbackQuery):
+        await callback.answer()
+        user_keys = get_user_keys(callback.from_user.id)
+        now = datetime.now()
+        active_keys = [key for key in user_keys if datetime.fromisoformat(key['expiry_date']) > now]
+        if not active_keys:
+            await _safe_edit_or_send(
+                callback.message,
+                "❌ У вас нет активной подписки.",
+                reply_markup=keyboards.create_profile_keyboard(show_renew_button=False)
+            )
+            return
+        await _safe_edit_or_send(
+            callback.message,
+            "⚙️ <b>Управление подпиской</b>\n\nВыберите нужный раздел:",
+            reply_markup=keyboards.create_subscription_management_keyboard()
+        )
+
+    @user_router.callback_query(F.data == "subscription_traffic_info")
+    @registration_required
+    async def subscription_traffic_info_handler(callback: types.CallbackQuery):
+        await callback.answer()
+        user_keys = get_user_keys(callback.from_user.id)
+        now = datetime.now()
+        active_keys = [key for key in user_keys if datetime.fromisoformat(key['expiry_date']) > now]
+        if not active_keys:
+            await _safe_edit_or_send(
+                callback.message,
+                "❌ У вас нет активной подписки.",
+                reply_markup=keyboards.create_profile_keyboard(show_renew_button=False)
+            )
+            return
+        traffic_summary = await _build_subscription_traffic_summary(user_keys or active_keys)
+        text = (
+            "📊 <b>Информация о трафике</b>\n\n"
+            "🔎 <b>Текущее использование:</b>\n"
+            f"├ Использовано: {traffic_summary['whitelist_used_text']}\n"
+            f"├ Лимит по подписке: {traffic_summary['whitelist_total_text']}\n"
+            f"├ Cброс трафика: {traffic_summary['reset_text']}\n"
+        )
+        await _safe_edit_or_send(
+            callback.message,
+            text,
+            reply_markup=keyboards.create_subscription_traffic_keyboard()
+        )
+
+    @user_router.callback_query(F.data == "subscription_devices")
+    @registration_required
+    async def subscription_devices_handler(callback: types.CallbackQuery):
+        await callback.answer()
+        text = (
+            "📱 <b>Устройства</b>\n\n"
+            "Сейчас бот не хранит человекочитаемые названия устройств из Happ и других клиентов.\n"
+            "Чтобы показывать и удалять именно устройства, нужно отдельно внедрить сохранение device-id на стороне бота."
+        )
+        await _safe_edit_or_send(
+            callback.message,
+            text,
+            reply_markup=keyboards.create_subscription_devices_keyboard()
+        )
+
+    @user_router.callback_query(F.data == "subscription_buy_traffic")
+    @registration_required
+    async def subscription_buy_traffic_handler(callback: types.CallbackQuery):
+        await callback.answer()
+        packages = get_active_traffic_packages() or []
+        if not packages:
+            await _safe_edit_or_send(
+                callback.message,
+                "➕ <b>Докупить трафик</b>\n\nПакеты трафика пока не настроены в панели.",
+                reply_markup=keyboards.create_subscription_traffic_keyboard()
+            )
+            return
+        await _safe_edit_or_send(
+            callback.message,
+            "➕ <b>Докупить трафик</b>\n\nВыберите пакет трафика:",
+            reply_markup=keyboards.create_traffic_packages_keyboard(packages)
+        )
+
+    @user_router.callback_query(F.data.startswith("trafficpack:"))
+    @registration_required
+    async def subscription_select_traffic_package_handler(callback: types.CallbackQuery, state: FSMContext):
+        await callback.answer()
+        try:
+            package_id = int((callback.data or "").split(":", 1)[1])
+        except Exception:
+            await _safe_edit_or_send(callback.message, "❌ Ошибка выбора пакета трафика.")
+            return
+        package = get_traffic_package_by_id(package_id)
+        if not package or int(package.get("is_active") or 0) != 1:
+            await _safe_edit_or_send(callback.message, "❌ Пакет трафика недоступен.")
+            return
+        await state.update_data(
+            action="traffic_package",
+            traffic_package_id=package_id,
+            key_id=0,
+            host_name="",
+            plan_id=None,
+        )
+        await _safe_edit_or_send(
+            callback.message,
+            "📧 Пожалуйста, введите ваш email для отправки чека об оплате.\n\n"
+            "Если вы не хотите указывать почту, нажмите кнопку ниже.",
+            reply_markup=keyboards.create_skip_email_keyboard()
+        )
+        await state.set_state(PaymentProcess.waiting_for_email)
 
     @user_router.callback_query(F.data == "profile_subscription_link")
     @registration_required
@@ -2541,6 +2811,16 @@ def get_user_router() -> Router:
                     )
                 else:
                     await _safe_edit_or_send(callback.message, "❌ Тарифы не настроены.")
+            elif action == 'traffic_package':
+                packages = get_active_traffic_packages() or []
+                if not packages:
+                    await _safe_edit_or_send(callback.message, "❌ Пакеты трафика пока не настроены.")
+                else:
+                    await _safe_edit_or_send(
+                        callback.message,
+                        "➕ <b>Докупить трафик</b>\n\nВыберите пакет трафика:",
+                        reply_markup=keyboards.create_traffic_packages_keyboard(packages)
+                    )
             elif action == 'new':
                 host_name, plans = _get_primary_host_with_plans()
                 if not host_name or not plans:
@@ -2587,31 +2867,31 @@ def get_user_router() -> Router:
     async def show_payment_options(message: types.Message, state: FSMContext):
         data = await state.get_data()
         user_data = get_user(message.chat.id)
-        plan = get_plan_by_id(data.get('plan_id'))
-        
-        if not plan:
+        checkout = _resolve_checkout_context(message.chat.id, data)
+
+        if not checkout:
             try:
-                await _safe_edit_or_send(message, "❌ Ошибка: Тариф не найден.")
+                await _safe_edit_or_send(message, "❌ Ошибка: объект оплаты не найден.")
             except TelegramBadRequest:
-                await message.answer("❌ Ошибка: Тариф не найден.")
+                await message.answer("❌ Ошибка: объект оплаты не найден.")
             await state.clear()
             return
-        
-        price = Decimal(str(plan['price']))
+
+        price = Decimal(str(checkout["price"]))
         final_price = price
         message_text = CHOOSE_PAYMENT_METHOD_MESSAGE
 
-        if user_data.get('referred_by') and user_data.get('total_spent', 0) == 0:
+        if checkout["kind"] == "subscription" and user_data.get('referred_by') and user_data.get('total_spent', 0) == 0:
             discount_percentage_str = get_setting("referral_discount") or "0"
             discount_percentage = Decimal(discount_percentage_str)
             
             if discount_percentage > 0:
-                discount_amount = (price * discount_percentage / 100).quantize(Decimal("0.01"))
-                final_price = price - discount_amount
+                discount_amount = (Decimal(str(checkout["plan"]['price'])) * discount_percentage / 100).quantize(Decimal("0.01"))
+                final_price = (Decimal(str(checkout["plan"]['price'])) - discount_amount).quantize(Decimal("0.01"))
 
                 message_text = (
                     f"🎉 Как приглашенному пользователю, на вашу первую покупку предоставляется скидка {discount_percentage_str}%!\n"
-                    f"Старая цена: <s>{price:.2f} RUB</s>\n"
+                    f"Старая цена: <s>{Decimal(str(checkout['plan']['price'])):.2f} RUB</s>\n"
                     f"<b>Новая цена: {final_price:.2f} RUB</b>\n\n"
                 ) + CHOOSE_PAYMENT_METHOD_MESSAGE
 
@@ -2669,7 +2949,8 @@ def get_user_router() -> Router:
                     show_balance=show_balance_btn,
                     main_balance=main_balance,
                     price=float(final_price),
-                    has_promo_applied=bool(promo_code)
+                    has_promo_applied=bool(promo_code),
+                    allow_promo=(checkout["kind"] == "subscription")
                 )
             )
         except TelegramBadRequest:
@@ -2682,7 +2963,8 @@ def get_user_router() -> Router:
                     show_balance=show_balance_btn,
                     main_balance=main_balance,
                     price=float(final_price),
-                    has_promo_applied=bool(promo_code)
+                    has_promo_applied=bool(promo_code),
+                    allow_promo=(checkout["kind"] == "subscription")
                 )
             )
         await state.set_state(PaymentProcess.waiting_for_payment_method)
@@ -2756,55 +3038,17 @@ def get_user_router() -> Router:
     @user_router.callback_query(PaymentProcess.waiting_for_payment_method, F.data == "pay_yookassa")
     async def create_yookassa_payment_handler(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Создаю ссылку на оплату...")
-        
         data = await state.get_data()
-        user_data = get_user(callback.from_user.id)
-        
-        plan_id = data.get('plan_id')
-        plan = get_plan_by_id(plan_id)
-
-        if not plan:
+        checkout = _resolve_checkout_context(callback.from_user.id, data)
+        if not checkout:
             await callback.message.answer("Произошла ошибка при выборе тарифа.")
             await state.clear()
             return
-
-        base_price = Decimal(str(plan['price']))
-        price_rub = base_price
-
-        if user_data.get('referred_by') and user_data.get('total_spent', 0) == 0:
-            discount_percentage_str = get_setting("referral_discount") or "0"
-            discount_percentage = Decimal(discount_percentage_str)
-            if discount_percentage > 0:
-                discount_amount = (base_price * discount_percentage / 100).quantize(Decimal("0.01"))
-                price_rub = base_price - discount_amount
-
-        final_price_decimal = price_rub
-        try:
-            final_price_from_state = data.get('final_price')
-            if final_price_from_state is not None:
-                final_price_decimal = Decimal(str(final_price_from_state)).quantize(Decimal("0.01"))
-        except Exception:
-            pass
-
-        if final_price_decimal < Decimal('0'):
-            final_price_decimal = Decimal('0.00')
-
-        plan_id = data.get('plan_id')
         customer_email = data.get('customer_email')
-        host_name = data.get('host_name')
-        action = data.get('action')
-        key_id = data.get('key_id')
         
         if not customer_email:
             customer_email = get_setting("receipt_email")
-
-        plan = get_plan_by_id(plan_id)
-        if not plan:
-            await callback.message.answer("Произошла ошибка при выборе тарифа.")
-            await state.clear()
-            return
-
-        months = plan['months']
+        final_price_decimal = Decimal(str(checkout["price"])).quantize(Decimal("0.01"))
         user_id = callback.from_user.id
 
         try:
@@ -2816,7 +3060,7 @@ def get_user_router() -> Router:
                 receipt = {
                     "customer": {"email": customer_email},
                     "items": [{
-                        "description": f"Подписка на {months} мес.",
+                        "description": checkout["payment_description"],
                         "quantity": "1.00",
                         "amount": {"value": price_str_for_api, "currency": "RUB"},
                         "vat_code": 1,
@@ -2828,17 +3072,13 @@ def get_user_router() -> Router:
                 "amount": {"value": price_str_for_api, "currency": "RUB"},
                 "confirmation": {"type": "redirect", "return_url": f"https://t.me/{TELEGRAM_BOT_USERNAME}"},
                 "capture": True,
-                "description": f"Подписка на {months} мес.",
-                "metadata": {
-                    "user_id": str(user_id), "months": str(months), "price": f"{price_float_for_metadata:.2f}", 
-                    "action": str(action) if action is not None else "",
-                    "key_id": (str(key_id) if key_id is not None else ""), "host_name": str(host_name) if host_name is not None else "",
-                    "plan_id": (str(plan_id) if plan_id is not None else ""), "customer_email": customer_email or "",
-                    "payment_method": "YooKassa",
-                    "promo_code": (data.get('promo_code') or ""),
-                    "promo_discount_percent": (str(data.get('promo_discount_percent')) if data.get('promo_discount_percent') is not None else ""),
-                    "promo_discount_amount": (str(data.get('promo_discount_amount')) if data.get('promo_discount_amount') is not None else ""),
-                }
+                "description": checkout["description"],
+                "metadata": _checkout_metadata_for_payment(
+                    checkout,
+                    data,
+                    "YooKassa",
+                    extra={"user_id": str(user_id), "price": f"{price_float_for_metadata:.2f}", "customer_email": customer_email or ""}
+                ),
             }
             if receipt:
                 payment_payload['receipt'] = receipt
@@ -2860,34 +3100,12 @@ def get_user_router() -> Router:
     async def create_yoomoney_payment_handler(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Готовлю ссылку ЮMoney…")
         data = await state.get_data()
-        user_data = get_user(callback.from_user.id)
-        plan = get_plan_by_id(data.get('plan_id'))
-        if not plan:
+        checkout = _resolve_checkout_context(callback.from_user.id, data)
+        if not checkout:
             await _safe_edit_or_send(callback.message, "❌ Произошла ошибка при выборе тарифа.")
             await state.clear()
             return
-        # Цена со скидкой по рефералке (как у других методов)
-        base_price = Decimal(str(plan['price']))
-        price_rub = base_price
-        if user_data and user_data.get('referred_by') and user_data.get('total_spent', 0) == 0:
-            try:
-                discount_percentage = Decimal(get_setting("referral_discount") or "0")
-            except Exception:
-                discount_percentage = Decimal("0")
-            if discount_percentage > 0:
-                price_rub = base_price - (base_price * discount_percentage / 100).quantize(Decimal("0.01"))
-
-        # Учитываем промокод (final_price хранится в состоянии как float)
-        final_price_decimal = price_rub
-        try:
-            final_price_from_state = data.get('final_price')
-            if final_price_from_state is not None:
-                final_price_decimal = Decimal(str(final_price_from_state)).quantize(Decimal("0.01"))
-        except Exception:
-            pass
-
-        if final_price_decimal < Decimal('0'):
-            final_price_decimal = Decimal('0.00')
+        final_price_decimal = Decimal(str(checkout["price"])).quantize(Decimal("0.01"))
 
         final_price_float = float(final_price_decimal)
 
@@ -2897,24 +3115,9 @@ def get_user_router() -> Router:
             await state.clear()
             return
 
-        months = int(plan['months'])
         user_id = callback.from_user.id
         payment_id = str(uuid.uuid4())
-        metadata = {
-            "payment_id": payment_id,
-            "user_id": user_id,
-            "months": months,
-            "price": final_price_float,
-            "action": data.get('action'),
-            "key_id": data.get('key_id'),
-            "host_name": data.get('host_name'),
-            "plan_id": data.get('plan_id'),
-            "customer_email": data.get('customer_email'),
-            "payment_method": "YooMoney",
-            "promo_code": data.get('promo_code'),
-            "promo_discount_percent": data.get('promo_discount_percent'),
-            "promo_discount_amount": data.get('promo_discount_amount'),
-        }
+        metadata = _checkout_metadata_for_payment(checkout, data, "YooMoney", extra={"payment_id": payment_id, "user_id": user_id, "price": final_price_float})
         # Сохраняем pending транзакцию в БД
         try:
             create_pending_transaction(payment_id, user_id, final_price_float, metadata)
@@ -2926,7 +3129,7 @@ def get_user_router() -> Router:
             success_url = f"https://t.me/{TELEGRAM_BOT_USERNAME}" if TELEGRAM_BOT_USERNAME else None
         except Exception:
             success_url = None
-        targets = f"Оплата {months} мес."
+        targets = checkout["payment_description"]
         pay_url = _build_yoomoney_quickpay_url(
             wallet=ym_wallet,
             amount=final_price_float,
@@ -2954,9 +3157,8 @@ def get_user_router() -> Router:
     async def create_platega_payment_handler(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Создаю ссылку Platega…")
         data = await state.get_data()
-        user_data = get_user(callback.from_user.id)
-        plan = get_plan_by_id(data.get('plan_id'))
-        if not plan:
+        checkout = _resolve_checkout_context(callback.from_user.id, data)
+        if not checkout:
             await _safe_edit_or_send(callback.message, "❌ Произошла ошибка при выборе тарифа.")
             await state.clear()
             return
@@ -2987,28 +3189,8 @@ def get_user_router() -> Router:
             await _safe_edit_or_send(callback.message, "❌ Неверный способ оплаты.")
             return
 
-        base_price = Decimal(str(plan['price']))
-        price_rub = base_price
-        if user_data and user_data.get('referred_by') and user_data.get('total_spent', 0) == 0:
-            try:
-                discount_percentage = Decimal(get_setting("referral_discount") or "0")
-            except Exception:
-                discount_percentage = Decimal("0")
-            if discount_percentage > 0:
-                price_rub = base_price - (base_price * discount_percentage / 100).quantize(Decimal("0.01"))
-
-        final_price_decimal = price_rub
-        try:
-            final_price_from_state = data.get('final_price')
-            if final_price_from_state is not None:
-                final_price_decimal = Decimal(str(final_price_from_state)).quantize(Decimal("0.01"))
-        except Exception:
-            pass
-        if final_price_decimal < Decimal('0'):
-            final_price_decimal = Decimal('0.00')
-
+        final_price_decimal = Decimal(str(checkout["price"])).quantize(Decimal("0.01"))
         final_price_float = float(final_price_decimal)
-        months = int(plan['months'])
         user_id = callback.from_user.id
         try:
             success_url = f"https://t.me/{TELEGRAM_BOT_USERNAME}" if TELEGRAM_BOT_USERNAME else None
@@ -3016,19 +3198,17 @@ def get_user_router() -> Router:
             success_url = None
 
         payload_obj = {
-            "kind": "subscription",
+            "kind": checkout["kind"],
             "user_id": user_id,
-            "months": months,
-            "plan_id": data.get('plan_id'),
             "action": data.get('action'),
         }
-
-        month_word = "месяцев"
-        if months % 10 == 1 and months % 100 != 11:
-            month_word = "месяц"
-        elif months % 10 in (2, 3, 4) and months % 100 not in (12, 13, 14):
-            month_word = "месяца"
-        description_text = f"q1 vpn - {months} {month_word}"
+        if checkout["kind"] == "subscription":
+            payload_obj["months"] = checkout["months"]
+            payload_obj["plan_id"] = data.get('plan_id')
+        else:
+            payload_obj["traffic_package_id"] = data.get('traffic_package_id')
+            payload_obj["traffic_gb"] = checkout["package_gb"]
+        description_text = checkout["description"]
         result = await _platega_create_for_method_candidates(
             amount_rub=final_price_float,
             description=description_text,
@@ -3044,21 +3224,7 @@ def get_user_router() -> Router:
             return
 
         pay_url, transaction_id, method_code_used, method_name_used = result
-        metadata = {
-            "payment_id": transaction_id,
-            "user_id": user_id,
-            "months": months,
-            "price": final_price_float,
-            "action": data.get('action'),
-            "key_id": data.get('key_id'),
-            "host_name": data.get('host_name'),
-            "plan_id": data.get('plan_id'),
-            "customer_email": data.get('customer_email'),
-            "payment_method": "Platega",
-            "promo_code": data.get('promo_code'),
-            "promo_discount_percent": data.get('promo_discount_percent'),
-            "promo_discount_amount": data.get('promo_discount_amount'),
-        }
+        metadata = _checkout_metadata_for_payment(checkout, data, "Platega", extra={"payment_id": transaction_id, "user_id": user_id, "price": final_price_float})
         try:
             create_pending_transaction(transaction_id, user_id, final_price_float, metadata)
         except Exception as e:
@@ -3069,10 +3235,9 @@ def get_user_router() -> Router:
             "Platega subscription: method='%s', provider_method='%s', code=%s",
             selected["method"], method_name_used, method_code_used
         )
-        plan_name = (plan.get("plan_name") or f"{months} {month_word}").strip()
         invoice_text = (
             f"💳 {selected['title']}\n\n"
-            f"Тариф: {plan_name}\n"
+            f"Тариф: {checkout['title']}\n"
             f"Сумма: {final_price_float:.2f} RUB\n"
             f"Способ: {selected['method']}"
         )
@@ -3092,40 +3257,16 @@ def get_user_router() -> Router:
     async def create_stars_invoice_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
         await callback.answer("Готовлю счёт в Stars…")
         data = await state.get_data()
-        user_data = get_user(callback.from_user.id)
-        plan = get_plan_by_id(data.get('plan_id'))
-        if not plan:
+        checkout = _resolve_checkout_context(callback.from_user.id, data)
+        if not checkout:
             await _safe_edit_or_send(callback.message, "❌ Произошла ошибка при выборе тарифа.")
             await state.clear()
             return
-        base_price = Decimal(str(plan['price']))
-        price_rub = base_price
-        if user_data and user_data.get('referred_by') and user_data.get('total_spent', 0) == 0:
-            try:
-                discount_percentage = Decimal(get_setting("referral_discount") or "0")
-            except Exception:
-                discount_percentage = Decimal("0")
-            if discount_percentage > 0:
-                price_rub = base_price - (base_price * discount_percentage / 100).quantize(Decimal("0.01"))
-        months = int(plan['months'])
-        price_decimal = Decimal(str(price_rub)).quantize(Decimal("0.01"))
+        price_decimal = Decimal(str(checkout["price"])).quantize(Decimal("0.01"))
         stars_count = _calc_stars_amount(price_decimal)
         # Для Stars ограничим payload до UUID, метаданные сохраним в pending‑транзакцию
         payment_id = str(uuid.uuid4())
-        metadata = {
-            "user_id": callback.from_user.id,
-            "months": months,
-            "price": float(price_decimal),
-            "action": data.get('action'),
-            "key_id": data.get('key_id'),
-            "host_name": data.get('host_name'),
-            "plan_id": data.get('plan_id'),
-            "customer_email": data.get('customer_email'),
-            "payment_method": "Stars",
-            "promo_code": data.get('promo_code'),
-            "promo_discount_percent": data.get('promo_discount_percent'),
-            "promo_discount_amount": data.get('promo_discount_amount'),
-        }
+        metadata = _checkout_metadata_for_payment(checkout, data, "Stars", extra={"user_id": callback.from_user.id, "price": float(price_decimal)})
         try:
             create_pending_transaction(payment_id, callback.from_user.id, float(price_decimal), metadata)
         except Exception as e:
@@ -3133,7 +3274,7 @@ def get_user_router() -> Router:
         payload = payment_id
 
         title = (get_setting("stars_title") or "Покупка VPN")
-        description = (get_setting("stars_description") or f"Оплата {months} мес.")
+        description = checkout["payment_description"]
         try:
             await bot.send_invoice(
                 chat_id=callback.message.chat.id,
@@ -3141,7 +3282,7 @@ def get_user_router() -> Router:
                 description=description,
                 payload=payload,
                 currency="XTR",
-                prices=[types.LabeledPrice(label=f"{months} мес.", amount=stars_count)],
+                prices=[types.LabeledPrice(label=checkout["title"], amount=stars_count)],
             )
             await state.clear()
         except Exception as e:
@@ -3154,14 +3295,12 @@ def get_user_router() -> Router:
         await callback.answer("Создаю счет в Crypto Pay...")
         
         data = await state.get_data()
-        user_data = get_user(callback.from_user.id)
-        
-        plan_id = data.get('plan_id')
+        checkout = _resolve_checkout_context(callback.from_user.id, data)
+        if not checkout:
+            await _safe_edit_or_send(callback.message, "❌ Произошла ошибка при выборе тарифа.")
+            await state.clear()
+            return
         user_id = data.get('user_id', callback.from_user.id)
-        customer_email = data.get('customer_email')
-        host_name = data.get('host_name')
-        action = data.get('action')
-        key_id = data.get('key_id')
 
         cryptobot_token = get_setting('cryptobot_token')
         if not cryptobot_token:
@@ -3169,32 +3308,20 @@ def get_user_router() -> Router:
             await _safe_edit_or_send(callback.message, "❌ Оплата криптовалютой временно недоступна. (Администратор не указал токен).")
             await state.clear()
             return
-
-        plan = get_plan_by_id(plan_id)
-        if not plan:
-            logger.error(f"Попытка создания счета Crypto Pay не удалась для пользователя {user_id}: План с id {plan_id} не найден.")
-            await _safe_edit_or_send(callback.message, "❌ Произошла ошибка при выборе тарифа.")
-            await state.clear()
-            return
-
-        base_price = Decimal(str(plan['price']))
-        price_rub_decimal = base_price
-        if user_data.get('referred_by') and user_data.get('total_spent', 0) == 0:
-            discount_percentage_str = get_setting("referral_discount") or "0"
-            discount_percentage = Decimal(discount_percentage_str)
-            if discount_percentage > 0:
-                discount_amount = (base_price * discount_percentage / 100).quantize(Decimal("0.01"))
-                price_rub_decimal = base_price - discount_amount
-        months = plan['months']
-
-        final_price_float = float(price_rub_decimal)
+        final_price_float = float(Decimal(str(checkout["price"])).quantize(Decimal("0.01")))
+        payment_id = str(uuid.uuid4())
+        metadata = _checkout_metadata_for_payment(checkout, data, "CryptoBot", extra={"payment_id": payment_id, "user_id": callback.from_user.id, "price": final_price_float})
+        try:
+            create_pending_transaction(payment_id, callback.from_user.id, final_price_float, metadata)
+        except Exception as e:
+            logger.warning(f"CryptoBot покупка: не удалось создать ожидающую транзакцию: {e}")
 
         result = await _create_cryptobot_invoice(
             user_id=callback.from_user.id,
             price_rub=final_price_float,
-            months=plan['months'],
+            months=int(checkout.get('months') or 0),
             host_name=data.get('host_name'),
-            state_data=data,
+            state_data={"payment_id": payment_id},
         )
         
         if result:
@@ -3275,26 +3402,18 @@ def get_user_router() -> Router:
                     await state.clear()
                     return
                 
-                # Разбираем payload
-                parts = payload_string.split(':')
-                if len(parts) < 9:
-                    logger.error(f"CryptoBot проверка: некорректный формат payload: {payload_string}")
+                metadata = find_and_complete_pending_transaction(
+                    payment_id=payload_string,
+                    amount_rub=None,
+                    payment_method="CryptoBot",
+                    currency_name="USDT",
+                    amount_currency=None,
+                )
+                if not metadata:
+                    logger.error(f"CryptoBot проверка: не удалось завершить pending transaction '{payload_string}'")
                     await _safe_edit_or_send(callback.message, "❌ Ошибка обработки платежа. Обратитесь в поддержку.")
                     await state.clear()
                     return
-                
-                metadata = {
-                    "user_id": parts[0],
-                    "months": parts[1],
-                    "price": parts[2],
-                    "action": parts[3],
-                    "key_id": parts[4],
-                    "host_name": parts[5],
-                    "plan_id": parts[6],
-                    "customer_email": parts[7] if parts[7] != 'None' else None,
-                    "payment_method": parts[8],
-                    "promo_code": (parts[9] if len(parts) > 9 and parts[9] else None),
-                }
                 
                 # Обрабатываем успешный платеж
                 await process_successful_payment(bot, metadata)
@@ -3320,16 +3439,15 @@ def get_user_router() -> Router:
         data = await state.get_data()
         user_id = callback.from_user.id
         wallet_address = get_setting("ton_wallet_address")
-        plan = get_plan_by_id(data.get('plan_id'))
-        
-        if not wallet_address or not plan:
+        checkout = _resolve_checkout_context(callback.from_user.id, data)
+        if not wallet_address or not checkout:
             await _safe_edit_or_send(callback.message, "❌ Оплата через TON временно недоступна.")
             await state.clear()
             return
 
         await callback.answer("Создаю ссылку и QR-код для TON Connect...")
             
-        price_rub = Decimal(str(data.get('final_price', plan['price'])))
+        price_rub = Decimal(str(checkout["price"]))
 
         usdt_rub_rate = await get_usdt_rub_rate()
         ton_usdt_rate = await get_ton_usdt_rate()
@@ -3343,15 +3461,7 @@ def get_user_router() -> Router:
         amount_nanoton = int(price_ton * 1_000_000_000)
         
         payment_id = str(uuid.uuid4())
-        metadata = {
-            "user_id": user_id, "months": plan['months'], "price": float(price_rub),
-            "action": data.get('action'), "key_id": data.get('key_id'),
-            "host_name": data.get('host_name'), "plan_id": data.get('plan_id'),
-            "customer_email": data.get('customer_email'), "payment_method": "TON Connect",
-            "promo_code": data.get('promo_code'),
-            "promo_discount_percent": data.get('promo_discount_percent'),
-            "promo_discount_amount": data.get('promo_discount_amount'),
-        }
+        metadata = _checkout_metadata_for_payment(checkout, data, "TON Connect", extra={"user_id": user_id, "price": float(price_rub)})
         create_pending_transaction(payment_id, user_id, float(price_rub), metadata)
 
         transaction_payload = {
@@ -3396,35 +3506,22 @@ def get_user_router() -> Router:
         await callback.answer()
         data = await state.get_data()
         user_id = callback.from_user.id
-        plan = get_plan_by_id(data.get('plan_id'))
-        if not plan:
-            await _safe_edit_or_send(callback.message, "❌ Ошибка: Тариф не найден.")
+        checkout = _resolve_checkout_context(callback.from_user.id, data)
+        if not checkout:
+            await _safe_edit_or_send(callback.message, "❌ Ошибка: объект оплаты не найден.")
             await state.clear()
             return
-        months = int(plan['months'])
-        price = float(data.get('final_price', plan['price']))
+        price = float(Decimal(str(checkout["price"])))
 
         # Пытаемся списать средства с основного баланса
         if not deduct_from_balance(user_id, price):
             await callback.answer("Недостаточно средств на основном балансе.", show_alert=True)
             return
 
-        metadata = {
-            "user_id": user_id,
-            "months": months,
-            "price": price,
-            "action": data.get('action'),
-            "key_id": data.get('key_id'),
-            "host_name": data.get('host_name'),
-            "plan_id": data.get('plan_id'),
-            "customer_email": data.get('customer_email'),
-            "payment_method": "Balance",
-            "promo_code": data.get('promo_code'),
-            "promo_discount_percent": data.get('promo_discount_percent'),
-            "promo_discount_amount": data.get('promo_discount_amount'),
-            "chat_id": callback.message.chat.id,
-            "message_id": callback.message.message_id
-        }
+        metadata = _checkout_metadata_for_payment(
+            checkout, data, "Balance",
+            extra={"user_id": user_id, "price": price, "chat_id": callback.message.chat.id, "message_id": callback.message.message_id}
+        )
 
         await state.clear()
         await process_successful_payment(bot, metadata)
@@ -3603,8 +3700,7 @@ async def _create_cryptobot_invoice(
     """Создать счёт в Telegram Crypto Pay и вернуть ссылку на оплату и ID счета.
 
     - Конвертирует RUB в USDT по рыночному курсу.
-    - Формирует payload в формате, ожидаемом обработчиком вебхука `/cryptobot-webhook`:
-      `user_id:months:price:action:key_id:host_name:plan_id:customer_email:payment_method`.
+    - Использует короткий payload = payment_id ожидающей транзакции.
     
     Returns:
         tuple[str, int] | None: (pay_url, invoice_id) или None при ошибке
@@ -3622,20 +3718,10 @@ async def _create_cryptobot_invoice(
 
         amount_usdt = (Decimal(str(price_rub)) / rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-        # Собираем payload для вебхука
-        payload_parts = [
-            str(user_id),
-            str(months),
-            str(float(price_rub)),
-            str(state_data.get("action")),
-            str(state_data.get("key_id")),
-            str(host_name or ""),
-            str(state_data.get("plan_id")),
-            str(state_data.get("customer_email")),
-            "CryptoBot",
-            str(state_data.get("promo_code") or ""),
-        ]
-        payload = ":".join(payload_parts)
+        payload = str(state_data.get("payment_id") or "").strip()
+        if not payload:
+            logger.error("CryptoBot: отсутствует payment_id для payload")
+            return None
 
         cp = CryptoPay(token)
         # Пытаемся создать инвойс в USDT; описание — краткое
@@ -3964,10 +4050,24 @@ async def notify_admin_of_purchase(bot: Bot, metadata: dict):
             return
         admin_id = int(admin_id_raw)
         user_id = metadata.get('user_id')
+        action = metadata.get('action')
+        if action == "traffic_package":
+            traffic_gb = float(metadata.get('traffic_gb') or 0)
+            price = float(metadata.get('price') or 0)
+            payment_method = metadata.get('payment_method') or 'Unknown'
+            await bot.send_message(
+                admin_id,
+                "📥 Новая оплата\n"
+                f"👤 Пользователь: {user_id}\n"
+                f"📦 Пакет трафика: {traffic_gb:.0f} ГБ\n"
+                f"💳 Метод: {payment_method}\n"
+                f"💰 Сумма: {price:.2f} RUB\n"
+                "⚙️ Действие: Докупка трафика"
+            )
+            return
         host_name = metadata.get('host_name')
         months = metadata.get('months')
         price = metadata.get('price')
-        action = metadata.get('action')
         payment_method = metadata.get('payment_method') or 'Unknown'
         # Локализация методов оплаты для уведомления админу
         payment_method_map = {
@@ -4080,6 +4180,51 @@ async def process_successful_payment(bot: Bot, metadata: dict):
                 admin_id = a.get('telegram_id')
                 if admin_id:
                     await bot.send_message(admin_id, f"📥 Пополнение: пользователь {user_id}, сумма {float(price):.2f} RUB")
+        except Exception:
+            pass
+        return
+
+    if action == "traffic_package":
+        package_gb = float(metadata.get("traffic_gb") or 0)
+        processed, success = await _apply_traffic_package_to_user(user_id, package_gb)
+        try:
+            user_info = get_user(user_id)
+            log_username = user_info.get('username', 'N/A') if user_info else 'N/A'
+            log_transaction(
+                username=log_username,
+                transaction_id=None,
+                payment_id=str(uuid.uuid4()),
+                user_id=user_id,
+                status='paid',
+                amount_rub=float(price),
+                amount_currency=None,
+                currency_name=None,
+                payment_method=payment_method or 'Unknown',
+                metadata=json.dumps({"action": "traffic_package", "traffic_gb": package_gb})
+            )
+        except Exception:
+            pass
+        if success > 0:
+            await bot.send_message(
+                chat_id=user_id,
+                text=(
+                    "✅ Пакет трафика успешно подключён!\n"
+                    f"📦 Добавлено: {package_gb:.0f} ГБ\n"
+                    f"🌐 Лимит обновлён на серверах: {success}"
+                ),
+                reply_markup=keyboards.create_subscription_traffic_keyboard()
+            )
+        else:
+            await bot.send_message(
+                chat_id=user_id,
+                text=(
+                    "⚠️ Оплата получена, но не удалось обновить лимит трафика автоматически.\n"
+                    "Обратитесь в поддержку."
+                ),
+                reply_markup=keyboards.create_support_keyboard()
+            )
+        try:
+            await notify_admin_of_purchase(bot, metadata)
         except Exception:
             pass
         return

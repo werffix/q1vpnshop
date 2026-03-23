@@ -194,6 +194,9 @@ def _resolve_host_client_traffic_limit_gb(host_data: dict | None) -> float | int
         return 200
     return explicit
 
+def resolve_host_client_traffic_limit_gb(host_data: dict | None) -> float | int | str | None:
+    return _resolve_host_client_traffic_limit_gb(host_data)
+
 def _subscription_secret() -> bytes:
     raw = (
         os.getenv("SHOPBOT_SUB_SECRET")
@@ -1125,6 +1128,138 @@ async def set_client_device_limit_on_host(host_name: str, client_email: str, dev
         return True
     except Exception as e:
         logger.error(f"Не удалось изменить лимит устройств клиента '{client_email}' на '{host_name}': {e}", exc_info=True)
+        return False
+
+
+async def increase_client_traffic_limit_on_host(host_name: str, client_email: str, add_gb: float) -> bool:
+    """Increase per-client traffic limit on host inbound by N GB."""
+    host_data = get_host(host_name)
+    if not host_data:
+        logger.error(f"Не удалось увеличить лимит трафика: хост '{host_name}' не найден.")
+        return False
+
+    api, inbound = login_to_host(
+        host_url=host_data['host_url'],
+        username=host_data['host_username'],
+        password=host_data['host_pass'],
+        inbound_id=host_data['host_inbound_id']
+    )
+    if not api or not inbound:
+        logger.error(f"Не удалось увеличить лимит трафика: ошибка входа/поиска inbound для '{host_name}'.")
+        return False
+
+    try:
+        inbound_to_modify = api.inbound.get_by_id(inbound.id)
+        clients = (inbound_to_modify.settings.clients or [])
+        target = None
+        for client in clients:
+            if getattr(client, "email", None) == client_email:
+                target = client
+                break
+        if not target:
+            logger.warning(f"Клиент '{client_email}' не найден на '{host_name}' для увеличения трафика.")
+            return False
+
+        add_bytes = _traffic_limit_bytes(add_gb)
+        if add_bytes is None or add_bytes <= 0:
+            logger.warning(f"Некорректное значение добавляемого трафика для '{client_email}' на '{host_name}': {add_gb}")
+            return False
+
+        current_total = 0
+        raw_total = _obj_get(target, "total")
+        try:
+            current_total = int(raw_total or 0)
+        except Exception:
+            current_total = 0
+        if current_total <= 0:
+            total_gb_like = _obj_get(target, "totalGB")
+            try:
+                total_gb_like = float(total_gb_like or 0)
+            except Exception:
+                total_gb_like = 0
+            if total_gb_like > 0:
+                current_total = int(total_gb_like if total_gb_like > 10_000_000 else total_gb_like * (1024 ** 3))
+        if current_total <= 0:
+            total_gb_like = _obj_get(target, "total_gb")
+            try:
+                total_gb_like = float(total_gb_like or 0)
+            except Exception:
+                total_gb_like = 0
+            if total_gb_like > 0:
+                current_total = int(total_gb_like if total_gb_like > 10_000_000 else total_gb_like * (1024 ** 3))
+
+        new_total = current_total + add_bytes
+        changed = False
+        for attr in ("total", "total_gb", "totalGB"):
+            try:
+                setattr(target, attr, new_total)
+                changed = True
+            except Exception:
+                pass
+        if not changed:
+            logger.warning(f"Не удалось установить новый лимит трафика для '{client_email}' на '{host_name}'.")
+            return False
+        api.inbound.update(inbound.id, inbound_to_modify)
+        logger.info(
+            f"Клиенту '{client_email}' на '{host_name}' увеличен лимит трафика на {float(add_gb):.2f} GB "
+            f"(новый total={new_total} bytes)."
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Не удалось увеличить лимит трафика клиента '{client_email}' на '{host_name}': {e}", exc_info=True)
+        return False
+
+
+async def set_client_traffic_limit_on_host(host_name: str, client_email: str, traffic_gb: float | int | str | None) -> bool:
+    """Set absolute per-client traffic limit on host inbound."""
+    host_data = get_host(host_name)
+    if not host_data:
+        logger.error(f"Не удалось установить лимит трафика: хост '{host_name}' не найден.")
+        return False
+
+    api, inbound = login_to_host(
+        host_url=host_data['host_url'],
+        username=host_data['host_username'],
+        password=host_data['host_pass'],
+        inbound_id=host_data['host_inbound_id']
+    )
+    if not api or not inbound:
+        logger.error(f"Не удалось установить лимит трафика: ошибка входа/поиска inbound для '{host_name}'.")
+        return False
+
+    try:
+        inbound_to_modify = api.inbound.get_by_id(inbound.id)
+        clients = (inbound_to_modify.settings.clients or [])
+        target = None
+        for client in clients:
+            if getattr(client, "email", None) == client_email:
+                target = client
+                break
+        if not target:
+            logger.warning(f"Клиент '{client_email}' не найден на '{host_name}' для установки лимита трафика.")
+            return False
+
+        total_bytes = _traffic_limit_bytes(traffic_gb)
+        if total_bytes is None:
+            logger.warning(f"Некорректный абсолютный лимит трафика для '{client_email}' на '{host_name}': {traffic_gb}")
+            return False
+
+        changed = False
+        for attr in ("total", "total_gb", "totalGB"):
+            try:
+                setattr(target, attr, int(total_bytes))
+                changed = True
+            except Exception:
+                pass
+        if not changed:
+            return False
+        api.inbound.update(inbound.id, inbound_to_modify)
+        logger.info(
+            f"Клиенту '{client_email}' на '{host_name}' установлен абсолютный лимит трафика {float(traffic_gb):.2f} GB."
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Не удалось установить лимит трафика клиента '{client_email}' на '{host_name}': {e}", exc_info=True)
         return False
 
 
