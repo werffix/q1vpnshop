@@ -66,6 +66,7 @@ from shop_bot.data_manager.database import (
     get_traffic_package_by_id,
     create_traffic_package_purchase,
     get_total_extra_traffic_gb_for_user,
+    get_extra_traffic_gb_for_user_key,
     get_user_subscription_devices,
     revoke_subscription_device,
 )
@@ -300,7 +301,22 @@ async def _build_subscription_traffic_summary(user_keys: list[dict], user_id: in
             whitelist_has_source = True
             whitelist_has_ok = True
             whitelist_used += used
-            whitelist_total += (total if total > 0 else int(host_limit_gb * (1024 ** 3)))
+            if total > 0:
+                whitelist_total += total
+            else:
+                extra_for_key_gb = 0.0
+                if user_id is not None:
+                    try:
+                        extra_for_key_gb = float(
+                            get_extra_traffic_gb_for_user_key(
+                                int(user_id),
+                                str(host_name or ""),
+                                str(key_data.get("key_email") or ""),
+                            ) or 0.0
+                        )
+                    except Exception:
+                        extra_for_key_gb = 0.0
+                whitelist_total += int((host_limit_gb + extra_for_key_gb) * (1024 ** 3))
         else:
             main_has_source = True
             main_has_ok = True

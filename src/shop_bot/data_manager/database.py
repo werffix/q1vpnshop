@@ -2149,6 +2149,24 @@ def get_total_extra_traffic_gb_for_user(user_id: int) -> float:
         logging.error(f"Не удалось получить докупленный трафик пользователя {user_id}: {e}")
         return 0.0
 
+def get_extra_traffic_gb_for_user_key(user_id: int, host_name: str, key_email: str) -> float:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT COALESCE(SUM(extra_gb), 0)
+                FROM traffic_package_purchases
+                WHERE user_id = ? AND host_name = ? AND key_email = ?
+                """,
+                (int(user_id), str(host_name), str(key_email)),
+            )
+            row = cursor.fetchone()
+            return float((row[0] if row else 0.0) or 0.0)
+    except sqlite3.Error as e:
+        logging.error(f"Не удалось получить докупленный трафик пользователя {user_id} для ключа {key_email}: {e}")
+        return 0.0
+
 def upsert_subscription_device(
     user_id: int,
     device_fingerprint: str,
