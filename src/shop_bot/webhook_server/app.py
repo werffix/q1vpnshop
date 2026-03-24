@@ -185,10 +185,8 @@ def create_webhook_app(bot_controller_instance):
 
     _traffic_stats_cache: dict[tuple[str, str], tuple[float, dict | None]] = {}
     _users_panel_cache: dict[tuple[int, int, str, str], tuple[float, tuple[list[dict], int]]] = {}
-    _subscription_payload_cache: dict[tuple[int, str], tuple[float, Response]] = {}
     _TRAFFIC_STATS_CACHE_TTL_SEC = 60.0
     _USERS_PANEL_CACHE_TTL_SEC = 20.0
-    _SUBSCRIPTION_PAYLOAD_CACHE_TTL_SEC = 60.0
 
     def _format_traffic(value_bytes: int | float | None) -> str:
         try:
@@ -472,7 +470,6 @@ def create_webhook_app(bot_controller_instance):
             return keys
 
     def _serve_unified_subscription(token: str):
-        started_at = time.time()
         # Allow tokens copied as "<token>" from docs/messages.
         token = (token or "").strip().strip("<>")
 
@@ -485,20 +482,6 @@ def create_webhook_app(bot_controller_instance):
             user_id = xui_api.resolve_user_id_by_legacy_sub_token(token, all_keys)
             if user_id is None:
                 return Response("Invalid subscription token", status=403, mimetype="text/plain")
-
-        cache_key = (int(user_id), token)
-        cached = _subscription_payload_cache.get(cache_key)
-        now_ts = time.time()
-        if cached and (now_ts - cached[0]) < _SUBSCRIPTION_PAYLOAD_CACHE_TTL_SEC:
-            cached_response = copy.deepcopy(cached[1])
-            logger.info(
-                "sub: cache-hit user_id=%s token=%s status=%s elapsed_ms=%s",
-                user_id,
-                token[:8],
-                cached_response.status_code,
-                int((time.time() - started_at) * 1000),
-            )
-            return cached_response
 
         keys = get_keys_for_user(user_id) or []
         # Create/ensure clients in inbound on all panels first, then collect VLESS.
@@ -539,18 +522,64 @@ def create_webhook_app(bot_controller_instance):
 
         merged_lines: list[str] = []
         seen = set()
+        upload_total = 0
+        download_total = 0
+        quota_total = 0
         expiry_candidates: list[int] = []
         for key in keys:
             try:
                 expiry_raw = key.get("expiry_date")
+                expiry_ms_exact = None
                 if expiry_raw:
                     try:
                         expiry_dt = datetime.fromisoformat(expiry_raw)
                         if expiry_dt <= datetime.now():
                             continue
                         expiry_candidates.append(int(expiry_dt.timestamp()))
+                        expiry_ms_exact = int(expiry_dt.timestamp() * 1000)
                     except Exception:
                         pass
+
+                # Self-heal: ensure client exists on host inbound before collecting links.
+                # If client was removed on 3x-ui panel, recreate/update it with the same expiry.
+                try:
+                    host_name = (key.get("host_name") or "").strip()
+                    key_email = (key.get("key_email") or "").strip()
+                    if host_name and key_email:
+                        repaired = asyncio.run(
+                            xui_api.create_or_update_key_on_host(
+                                host_name=host_name,
+                                email=key_email,
+                                days_to_add=None,
+                                expiry_timestamp_ms=expiry_ms_exact,
+                                preferred_uuid=user_uuid
+                            )
+                        )
+                        if repaired and key.get("key_id"):
+                            update_key_info(
+                                int(key["key_id"]),
+                                repaired.get("client_uuid"),
+                                repaired.get("expiry_timestamp_ms")
+                            )
+                            # keep in-memory data fresh for downstream calls in this loop
+                            key["xui_client_uuid"] = repaired.get("client_uuid") or key.get("xui_client_uuid")
+                except Exception as e:
+                    logger.warning(f"Self-heal клиента не выполнен для key_id={key.get('key_id')}: {e}")
+
+                usage_data = asyncio.run(xui_api.get_key_usage_stats_from_host(key)) or {}
+                try:
+                    up = max(int(usage_data.get("upload_bytes", 0) or 0), 0)
+                    down = max(int(usage_data.get("download_bytes", 0) or 0), 0)
+                    total = max(int(usage_data.get("total_bytes", 0) or 0), 0)
+
+                    upload_total += up
+                    download_total += down
+                    quota_total += total
+                    expiry_ms = int(usage_data.get("expiry_timestamp_ms", 0) or 0)
+                    if expiry_ms > 0:
+                        expiry_candidates.append(expiry_ms // 1000)
+                except Exception:
+                    pass
 
                 # Fast path: build direct VLESS URI from inbound/client.
                 # This avoids slow nested subscription HTTP hops.
@@ -615,15 +644,7 @@ def create_webhook_app(bot_controller_instance):
 
         if not merged_lines:
             if has_active_key or has_unknown_expiry:
-                response = Response("No subscription entries available", status=503, mimetype="text/plain")
-                logger.info(
-                    "sub: no-entries user_id=%s token=%s status=%s elapsed_ms=%s",
-                    user_id,
-                    token[:8],
-                    response.status_code,
-                    int((time.time() - started_at) * 1000),
-                )
-                return response
+                return Response("No subscription entries available", status=503, mimetype="text/plain")
             # Expired subscriptions must not recreate clients on any host.
             # Return placeholder profile only.
             expired_name = urllib.parse.quote("🚫 Ваша подписка истекла! - @q1vpn_bot")
@@ -641,14 +662,6 @@ def create_webhook_app(bot_controller_instance):
             response.headers["profile-description"] = _header_utf8_via_latin1(
                 "Продлите подписку в боте - @q1vpn_bot"
             )
-            _subscription_payload_cache[cache_key] = (time.time(), copy.deepcopy(response))
-            logger.info(
-                "sub: expired-placeholder user_id=%s token=%s lines=%s elapsed_ms=%s",
-                user_id,
-                token[:8],
-                1,
-                int((time.time() - started_at) * 1000),
-            )
             return response
 
         combined = "\n".join(merged_lines) + "\n"
@@ -663,15 +676,6 @@ def create_webhook_app(bot_controller_instance):
         # Hint clients (Happ/v2ray-like) to auto-refresh profile every 3 hours.
         response.headers["profile-update-interval"] = "3"
         response.headers["update-interval"] = "3"
-        _subscription_payload_cache[cache_key] = (time.time(), copy.deepcopy(response))
-        logger.info(
-            "sub: ready user_id=%s token=%s lines=%s elapsed_ms=%s bytes=%s",
-            user_id,
-            token[:8],
-            len(merged_lines),
-            int((time.time() - started_at) * 1000),
-            len(encoded),
-        )
         return response
 
     @flask_app.route('/sub/<token>', methods=['GET'])
