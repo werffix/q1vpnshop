@@ -39,10 +39,12 @@ from shop_bot.data_manager.database import (
     ban_user,
     unban_user,
     delete_key_by_email,
+    delete_user_keys,
     get_admin_stats,
     get_keys_for_host,
     update_key_info,
     is_admin,
+    reset_user_state,
     get_referral_count,
     get_referral_balance_all,
     get_referrals_for_user,
@@ -100,6 +102,21 @@ class Broadcast(StatesGroup):
     waiting_for_button_text = State()
     waiting_for_button_url = State()
     waiting_for_confirmation = State()
+
+
+class AdminUsersSearch(StatesGroup):
+    waiting_query = State()
+
+
+class AdminUserMessage(StatesGroup):
+    waiting_text = State()
+
+
+class AdminSubscriptionDate(StatesGroup):
+    waiting_datetime = State()
+
+
+_ADMIN_USER_SEARCH_CACHE: dict[int, str] = {}
 
 
 def get_admin_router() -> Router:
@@ -268,6 +285,105 @@ def get_admin_router() -> Router:
 
     async def _get_host_total_traffic(host_data: dict) -> dict:
         return await asyncio.to_thread(_get_host_total_traffic_sync, host_data)
+
+    async def _get_live_traffic_used_for_key(key_data: dict) -> int:
+        try:
+            server_id = str(key_data.get("server_id") or key_data.get("host_name") or "").strip()
+            panel_email = str(key_data.get("panel_email") or key_data.get("key_email") or "").strip()
+            if not server_id or not panel_email:
+                return 0
+            client_host = await xui_api.get_client(server_id)
+            if not client_host:
+                return 0
+            stats = await xui_api.get_client_stats(client_host, panel_email)
+            if not stats:
+                return 0
+            up = max(int(stats.get("up") or 0), 0)
+            down = max(int(stats.get("down") or 0), 0)
+            return up + down
+        except Exception:
+            return 0
+
+    def _filter_admin_users(users: list[dict], query: str | None) -> list[dict]:
+        normalized = (query or "").strip().lower().lstrip("@")
+        if not normalized:
+            return list(users or [])
+        filtered: list[dict] = []
+        for user in users or []:
+            user_id = str(user.get("telegram_id") or "")
+            username = str(user.get("username") or "").strip().lower().lstrip("@")
+            if normalized in user_id or (username and normalized in username):
+                filtered.append(user)
+        return filtered
+
+    def _get_admin_users_query(admin_id: int, state_data: dict | None = None) -> str | None:
+        query = (state_data or {}).get("admin_users_query")
+        if query:
+            _ADMIN_USER_SEARCH_CACHE[int(admin_id)] = str(query)
+            return str(query)
+        return _ADMIN_USER_SEARCH_CACHE.get(int(admin_id))
+
+    async def _render_admin_user_card(user_id: int) -> tuple[str, types.InlineKeyboardMarkup] | tuple[None, None]:
+        user = get_user(user_id)
+        if not user:
+            return None, None
+
+        username = (user.get("username") or "").strip()
+        if username:
+            uname = username.lstrip('@')
+            user_tag = f"<a href='https://t.me/{uname}'>@{uname}</a>"
+        else:
+            user_tag = f"<a href='tg://user?id={user_id}'>{user_id}</a>"
+
+        keys = get_keys_for_user(user_id) or []
+        latest_expiry_dt: datetime | None = None
+        has_active = False
+        for key in keys:
+            raw_expiry = str(key.get("expiry_date") or "").strip()
+            if not raw_expiry:
+                continue
+            try:
+                expiry_dt = datetime.fromisoformat(raw_expiry)
+            except Exception:
+                continue
+            if latest_expiry_dt is None or expiry_dt > latest_expiry_dt:
+                latest_expiry_dt = expiry_dt
+            if expiry_dt > datetime.now():
+                has_active = True
+
+        traffic_used = 0
+        if keys:
+            traffic_results = await asyncio.gather(
+                *[_get_live_traffic_used_for_key(k) for k in keys],
+                return_exceptions=True,
+            )
+            for result in traffic_results:
+                if isinstance(result, Exception):
+                    continue
+                traffic_used += max(int(result or 0), 0)
+
+        ref_count = 0
+        try:
+            ref_count = int(get_referral_count(user_id) or 0)
+        except Exception:
+            ref_count = 0
+
+        sub_link = build_unified_subscription_url(user_id) or (user.get("subscription_link") or "—")
+        expiry_text = latest_expiry_dt.strftime("%d.%m.%Y %H:%M") if latest_expiry_dt else "—"
+        status_text = "Активна" if has_active else "Неактивна"
+        is_banned = bool(user.get("is_banned"))
+        text = (
+            f"👤 <b>Пользователь {user_id}</b>\n\n"
+            f"Username: {user_tag}\n"
+            f"Статус подписки: {status_text}\n"
+            f"Дата окончания подписки: {expiry_text}\n"
+            f"Приглашено друзей: {ref_count}\n"
+            f"Саб ссылка:\n{html_escape.escape(str(sub_link or '—'))}\n"
+            f"Потрачено трафика: {_format_traffic(traffic_used)}\n"
+            f"Баланс: {float(user.get('balance') or 0):.2f} RUB\n"
+            f"Забанен: {'да' if is_banned else 'нет'}"
+        )
+        return text, keyboards.create_admin_user_actions_keyboard(user_id, is_banned=is_banned)
 
     # Helper: форматирование упоминания пользователя (инициатора)
     def _format_user_mention(u: types.User) -> str:
@@ -1358,22 +1474,55 @@ def get_admin_router() -> Router:
             await message_or_msg.answer(text, reply_markup=kb)
 
     # --- Пользователи: список, пагинация, просмотр ---
-    @admin_router.callback_query(F.data.startswith("admin_users"))
+    @admin_router.callback_query((F.data == "admin_users") | (F.data.startswith("admin_users_page_")))
     async def admin_users_handler(callback: types.CallbackQuery, state: FSMContext):
         if not is_admin(callback.from_user.id):
             await callback.answer("У вас нет прав.", show_alert=True)
             return
         await callback.answer()
-        users = get_all_users()
+        state_data = await state.get_data()
+        query = _get_admin_users_query(callback.from_user.id, state_data)
+        users = _filter_admin_users(get_all_users() or [], query)
         page = 0
         if callback.data.startswith("admin_users_page_"):
             try:
                 page = int(callback.data.split("_")[-1])
             except Exception:
                 page = 0
+        title = "👥 <b>Пользователи</b>"
+        if query:
+            title += f"\n\nПоиск: <code>{html_escape.escape(str(query))}</code>"
         await _safe_edit_or_send(callback.message, 
-            "👥 <b>Пользователи</b>",
+            title,
             reply_markup=keyboards.create_admin_users_keyboard(users, page=page)
+        )
+
+    @admin_router.callback_query(F.data == "admin_users_search")
+    async def admin_users_search_prompt(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await state.set_state(AdminUsersSearch.waiting_query)
+        await _safe_edit_or_send(
+            callback.message,
+            "🔍 <b>Поиск пользователя</b>\n\nОтправьте @username или Telegram ID.",
+            reply_markup=keyboards.create_admin_cancel_keyboard()
+        )
+
+    @admin_router.message(AdminUsersSearch.waiting_query)
+    async def admin_users_search_process(message: types.Message, state: FSMContext):
+        if not is_admin(message.from_user.id):
+            return
+        query = (message.text or "").strip()
+        _ADMIN_USER_SEARCH_CACHE[int(message.from_user.id)] = query
+        await state.update_data(admin_users_query=query)
+        await state.clear()
+        await state.update_data(admin_users_query=query)
+        users = _filter_admin_users(get_all_users() or [], query)
+        await message.answer(
+            f"👥 <b>Пользователи</b>\n\nПоиск: <code>{html_escape.escape(query)}</code>",
+            reply_markup=keyboards.create_admin_users_keyboard(users, page=0)
         )
 
     @admin_router.callback_query(F.data.startswith("admin_view_user_"))
@@ -1387,37 +1536,11 @@ def get_admin_router() -> Router:
         except Exception:
             await callback.message.answer("❌ Неверный формат user_id")
             return
-        user = get_user(user_id)
-        if not user:
+        text, reply_markup = await _render_admin_user_card(user_id)
+        if not text:
             await callback.message.answer("❌ Пользователь не найден")
             return
-        # Собираем краткую информацию
-        username = user.get('username') or '—'
-        # Формируем кликабельный тег пользователя
-        if user.get('username'):
-            uname = user.get('username').lstrip('@')
-            user_tag = f"<a href='https://t.me/{uname}'>@{uname}</a>"
-        else:
-            user_tag = f"<a href='tg://user?id={user_id}'>Профиль</a>"
-        is_banned = user.get('is_banned', False)
-        total_spent = user.get('total_spent', 0)
-        balance = user.get('balance', 0)
-        referred_by = user.get('referred_by')
-        keys = get_keys_for_user(user_id)
-        keys_count = len(keys)
-        text = (
-            f"👤 <b>Пользователь {user_id}</b>\n\n"
-            f"Имя пользователя: {user_tag}\n"
-            f"Всего потратил: {float(total_spent):.2f} RUB\n"
-            f"Баланс: {float(balance):.2f} RUB\n"
-            f"Забанен: {'да' if is_banned else 'нет'}\n"
-            f"Приглашён: {referred_by if referred_by else '—'}\n"
-            f"Подписок: {keys_count}"
-        )
-        await _safe_edit_or_send(callback.message, 
-            text,
-            reply_markup=keyboards.create_admin_user_actions_keyboard(user_id, is_banned=is_banned)
-        )
+        await _safe_edit_or_send(callback.message, text, reply_markup=reply_markup, disable_web_page_preview=True)
 
     # --- Бан/разбан пользователя ---
     @admin_router.callback_query(F.data.startswith("admin_ban_user_"))
@@ -1468,35 +1591,12 @@ def get_admin_router() -> Router:
         except Exception as e:
             await callback.message.answer(f"❌ Не удалось забанить пользователя: {e}")
             return
-        # Обновить карточку пользователя
-        user = get_user(user_id) or {}
-        username = user.get('username') or '—'
-        if user.get('username'):
-            uname = user.get('username').lstrip('@')
-            user_tag = f"<a href='https://t.me/{uname}'>@{uname}</a>"
-        else:
-            user_tag = f"<a href='tg://user?id={user_id}'>Профиль</a>"
-        total_spent = user.get('total_spent', 0)
-        balance = user.get('balance', 0)
-        referred_by = user.get('referred_by')
-        keys = get_keys_for_user(user_id)
-        keys_count = len(keys)
-        text = (
-            f"👤 <b>Пользователь {user_id}</b>\n\n"
-            f"Имя пользователя: {user_tag}\n"
-            f"Всего потратил: {float(total_spent):.2f} RUB\n"
-            f"Баланс: {float(balance):.2f} RUB\n"
-            f"Забанен: да\n"
-            f"Приглашён: {referred_by if referred_by else '—'}\n"
-            f"Ключей: {keys_count}"
-        )
-        try:
-            await _safe_edit_or_send(callback.message, 
-                text,
-                reply_markup=keyboards.create_admin_user_actions_keyboard(user_id, is_banned=True)
-            )
-        except Exception:
-            pass
+        text, reply_markup = await _render_admin_user_card(user_id)
+        if text:
+            try:
+                await _safe_edit_or_send(callback.message, text, reply_markup=reply_markup, disable_web_page_preview=True)
+            except Exception:
+                pass
 
     # --- Подменю администраторов ---
     @admin_router.callback_query(F.data == "admin_admins_menu")
@@ -1576,36 +1676,202 @@ def get_admin_router() -> Router:
         except Exception as e:
             await callback.message.answer(f"❌ Не удалось разбанить пользователя: {e}")
             return
-        # Обновить карточку пользователя
-        user = get_user(user_id) or {}
-        username = user.get('username') or '—'
-        # Формируем кликабельный тег пользователя
-        if user.get('username'):
-            uname = user.get('username').lstrip('@')
-            user_tag = f"<a href='https://t.me/{uname}'>@{uname}</a>"
-        else:
-            user_tag = f"<a href='tg://user?id={user_id}'>Профиль</a>"
-        total_spent = user.get('total_spent', 0)
-        balance = user.get('balance', 0)
-        referred_by = user.get('referred_by')
-        keys = get_keys_for_user(user_id)
-        keys_count = len(keys)
-        text = (
-            f"👤 <b>Пользователь {user_id}</b>\n\n"
-            f"Имя пользователя: {user_tag}\n"
-            f"Всего потратил: {float(total_spent):.2f} RUB\n"
-            f"Баланс: {float(balance):.2f} RUB\n"
-            f"Забанен: нет\n"
-            f"Приглашён: {referred_by if referred_by else '—'}\n"
-            f"Ключей: {keys_count}"
-        )
+        text, reply_markup = await _render_admin_user_card(user_id)
+        if text:
+            try:
+                await _safe_edit_or_send(callback.message, text, reply_markup=reply_markup, disable_web_page_preview=True)
+            except Exception:
+                pass
+
+    @admin_router.callback_query(F.data.startswith("admin_balance_menu_"))
+    async def admin_balance_menu(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
         try:
-            await _safe_edit_or_send(callback.message, 
-                text,
-                reply_markup=keyboards.create_admin_user_actions_keyboard(user_id, is_banned=False)
-            )
+            user_id = int(callback.data.split("_")[-1])
+        except Exception:
+            await callback.message.answer("❌ Неверный формат user_id")
+            return
+        await _safe_edit_or_send(
+            callback.message,
+            f"💼 <b>Изменение баланса</b>\n\nПользователь: <code>{user_id}</code>",
+            reply_markup=keyboards.create_admin_user_balance_keyboard(user_id),
+        )
+
+    @admin_router.callback_query(F.data.startswith("admin_reset_user_"))
+    async def admin_reset_user(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        try:
+            user_id = int(callback.data.split("_")[-1])
+        except Exception:
+            await callback.message.answer("❌ Неверный формат user_id")
+            return
+        ok = reset_user_state(user_id)
+        if ok:
+            try:
+                await callback.bot.send_message(user_id, "❌ Ваша подписка была сброшена администратором.")
+            except Exception:
+                pass
+            await callback.message.answer(f"✅ Пользователь {user_id} сброшен.")
+        else:
+            await callback.message.answer(f"❌ Не удалось сбросить пользователя {user_id}.")
+        text, reply_markup = await _render_admin_user_card(user_id)
+        if text:
+            await _safe_edit_or_send(callback.message, text, reply_markup=reply_markup, disable_web_page_preview=True)
+
+    @admin_router.callback_query(F.data.startswith("admin_change_expiry_"))
+    async def admin_change_expiry_prompt(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        try:
+            user_id = int(callback.data.split("_")[-1])
+        except Exception:
+            await callback.message.answer("❌ Неверный формат user_id")
+            return
+        await state.update_data(admin_change_expiry_user_id=user_id)
+        await state.set_state(AdminSubscriptionDate.waiting_datetime)
+        await _safe_edit_or_send(
+            callback.message,
+            (
+                "📅 <b>Изменение даты подписки</b>\n\n"
+                f"Пользователь: <code>{user_id}</code>\n"
+                "Введите новую дату в формате <code>YYYY-MM-DD HH:MM</code>.\n"
+                "Например: <code>2026-04-30 23:59</code>"
+            ),
+            reply_markup=keyboards.create_admin_cancel_keyboard()
+        )
+
+    @admin_router.message(AdminSubscriptionDate.waiting_datetime)
+    async def admin_change_expiry_process(message: types.Message, state: FSMContext):
+        if not is_admin(message.from_user.id):
+            return
+        data = await state.get_data()
+        user_id = int(data.get("admin_change_expiry_user_id") or 0)
+        raw_value = (message.text or "").strip()
+        try:
+            target_dt = datetime.strptime(raw_value, "%Y-%m-%d %H:%M")
+            target_ms = int(target_dt.timestamp() * 1000)
+        except Exception:
+            await message.answer("❌ Некорректный формат. Используйте <code>YYYY-MM-DD HH:MM</code>.", parse_mode="HTML")
+            return
+        user_keys = get_keys_for_user(user_id) or []
+        if not user_keys:
+            await message.answer("❌ У пользователя нет ключей для изменения даты.")
+            await state.clear()
+            return
+        updated = 0
+        for key in user_keys:
+            host_name = key.get("host_name")
+            key_email = key.get("key_email")
+            if not host_name or not key_email:
+                continue
+            try:
+                result = await create_or_update_key_on_host(
+                    host_name=host_name,
+                    email=key_email,
+                    days_to_add=None,
+                    expiry_timestamp_ms=target_ms,
+                )
+                if not result:
+                    continue
+                update_key_info(
+                    int(key.get("key_id")),
+                    result.get("client_uuid") or key.get("xui_client_uuid") or "",
+                    int(result.get("expiry_timestamp_ms") or target_ms),
+                )
+                updated += 1
+            except Exception as e:
+                logger.warning(f"admin_change_expiry_process: user={user_id}, host={host_name}: {e}")
+        await state.clear()
+        if updated:
+            await message.answer(f"✅ Дата подписки обновлена для пользователя {user_id}. Обновлено ключей: {updated}.")
+        else:
+            await message.answer("❌ Не удалось изменить дату подписки.")
+        card_text, reply_markup = await _render_admin_user_card(user_id)
+        if card_text:
+            await message.answer(card_text, reply_markup=reply_markup, disable_web_page_preview=True)
+
+    @admin_router.callback_query(F.data.startswith("admin_revoke_user_"))
+    async def admin_revoke_user(callback: types.CallbackQuery):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        try:
+            user_id = int(callback.data.split("_")[-1])
+        except Exception:
+            await callback.message.answer("❌ Неверный формат user_id")
+            return
+        keys_to_revoke = get_keys_for_user(user_id) or []
+        total = len(keys_to_revoke)
+        success_count = 0
+        for key in keys_to_revoke:
+            try:
+                result = await delete_client_on_host(key.get("host_name"), key.get("key_email"))
+                if result:
+                    success_count += 1
+            except Exception as e:
+                logger.warning(f"admin_revoke_user: user={user_id}, key={key.get('key_email')}: {e}")
+        try:
+            delete_user_keys(user_id)
+        except Exception as e:
+            logger.warning(f"admin_revoke_user: DB delete failed for user={user_id}: {e}")
+        try:
+            await callback.bot.send_message(user_id, "❌ Ваша подписка была отозвана администратором.")
         except Exception:
             pass
+        await callback.message.answer(
+            f"✅ Подписка пользователя {user_id} отозвана. Удалено на серверах: {success_count}/{total}."
+        )
+        card_text, reply_markup = await _render_admin_user_card(user_id)
+        if card_text:
+            await _safe_edit_or_send(callback.message, card_text, reply_markup=reply_markup, disable_web_page_preview=True)
+
+    @admin_router.callback_query(F.data.startswith("admin_message_user_"))
+    async def admin_message_user_prompt(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        try:
+            user_id = int(callback.data.split("_")[-1])
+        except Exception:
+            await callback.message.answer("❌ Неверный формат user_id")
+            return
+        await state.update_data(admin_message_user_id=user_id)
+        await state.set_state(AdminUserMessage.waiting_text)
+        await _safe_edit_or_send(
+            callback.message,
+            f"✉️ <b>Сообщение пользователю</b>\n\nПользователь: <code>{user_id}</code>\n\nОтправьте текст сообщения.",
+            reply_markup=keyboards.create_admin_cancel_keyboard()
+        )
+
+    @admin_router.message(AdminUserMessage.waiting_text)
+    async def admin_message_user_send(message: types.Message, state: FSMContext):
+        if not is_admin(message.from_user.id):
+            return
+        data = await state.get_data()
+        user_id = int(data.get("admin_message_user_id") or 0)
+        text = (message.text or "").strip()
+        if not user_id or not text:
+            await message.answer("❌ Не удалось определить пользователя или текст сообщения.")
+            return
+        try:
+            await message.bot.send_message(user_id, text)
+            await message.answer(f"✅ Сообщение отправлено пользователю {user_id}.")
+        except Exception as e:
+            await message.answer(f"❌ Не удалось отправить сообщение: {e}")
+        await state.clear()
+        card_text, reply_markup = await _render_admin_user_card(user_id)
+        if card_text:
+            await message.answer(card_text, reply_markup=reply_markup, disable_web_page_preview=True)
 
     # --- Подписки пользователя: список и карточка ---
     @admin_router.callback_query(F.data.startswith("admin_user_keys_"))

@@ -400,6 +400,7 @@ def create_main_menu_keyboard(
 
 def create_admin_menu_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    builder.button(text="👥 Пользователи", callback_data="admin_users")
     builder.button(text="🌐 Веб-панель", url="https://q1.servernux.com:8443/")
     builder.button(text="📢 Рассылка", callback_data="start_broadcast")
     builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
@@ -423,15 +424,16 @@ def create_admin_monitor_keyboard() -> InlineKeyboardMarkup:
     builder.adjust(1, 1)
     return builder.as_markup()
 
-def create_admin_users_keyboard(users: list[dict], page: int = 0, page_size: int = 10) -> InlineKeyboardMarkup:
+def create_admin_users_keyboard(users: list[dict], page: int = 0, page_size: int = 5) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     start = page * page_size
     end = start + page_size
     for u in users[start:end]:
         user_id = u.get('telegram_id') or u.get('user_id') or u.get('id')
         username = u.get('username') or '—'
-        title = f"{user_id} • @{username}" if username != '—' else f"{user_id}"
+        title = f"@{username} - {user_id}" if username != '—' else f"{user_id}"
         builder.button(text=title, callback_data=f"admin_view_user_{user_id}")
+    builder.button(text="🔍 Поиск", callback_data="admin_users_search")
     # pagination
     total = len(users)
     have_prev = page > 0
@@ -441,9 +443,9 @@ def create_admin_users_keyboard(users: list[dict], page: int = 0, page_size: int
     if have_next:
         builder.button(text="Вперёд ➡️", callback_data=f"admin_users_page_{page+1}")
     builder.button(text="⬅️ В админ-меню", callback_data="admin_menu")
-    # layout: list (1 per row), then pagination/buttons (2), then back (1)
+    # layout: list, search, pagination, back
     rows = [1] * len(users[start:end])
-    tail = []
+    tail = [1]
     if have_prev or have_next:
         tail.append(2 if (have_prev and have_next) else 1)
     tail.append(1)
@@ -452,19 +454,29 @@ def create_admin_users_keyboard(users: list[dict], page: int = 0, page_size: int
 
 def create_admin_user_actions_keyboard(user_id: int, is_banned: bool | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="➕ Начислить баланс", callback_data=f"admin_add_balance_{user_id}")
-    builder.button(text="➖ Списать баланс", callback_data=f"admin_deduct_balance_{user_id}")
-    builder.button(text="🎁 Выдать ключ", callback_data=f"admin_gift_key_{user_id}")
+    builder.button(text="🔄 Продлить подписку", callback_data=f"admin_gift_key_{user_id}")
+    builder.button(text="📅 Изменить дату", callback_data=f"admin_change_expiry_{user_id}")
+    builder.button(text="♻️ Сбросить пользователя", callback_data=f"admin_reset_user_{user_id}")
+    builder.button(text="🗑 Отозвать подписку", callback_data=f"admin_revoke_user_{user_id}")
+    builder.button(text="💼 Изменить баланс", callback_data=f"admin_balance_menu_{user_id}")
+    builder.button(text="✉️ Написать от бота", callback_data=f"admin_message_user_{user_id}")
     builder.button(text="🤝 Рефералы пользователя", callback_data=f"admin_user_referrals_{user_id}")
     if is_banned is True:
         builder.button(text="✅ Разбанить", callback_data=f"admin_unban_user_{user_id}")
     else:
-        builder.button(text="🚫 Забанить", callback_data=f"admin_ban_user_{user_id}")
-    builder.button(text="✏️ Ключи пользователя", callback_data=f"admin_user_keys_{user_id}")
+        builder.button(text="🚫 Выдать бан", callback_data=f"admin_ban_user_{user_id}")
+    builder.button(text="🔑 Подписки пользователя", callback_data=f"admin_user_keys_{user_id}")
     builder.button(text="⬅️ К списку", callback_data="admin_users")
     builder.button(text="⬅️ В админ-меню", callback_data="admin_menu")
-    # Сделаем шире: 2 колонки, затем назад и в админ-меню
-    builder.adjust(2, 2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 2, 1, 1)
+    return builder.as_markup()
+
+def create_admin_user_balance_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="➕ Начислить баланс", callback_data=f"admin_add_balance_{user_id}")
+    builder.button(text="➖ Списать баланс", callback_data=f"admin_deduct_balance_{user_id}")
+    builder.button(text="⬅️ К пользователю", callback_data=f"admin_view_user_{user_id}")
+    builder.adjust(2, 1)
     return builder.as_markup()
 
 def create_admin_user_keys_keyboard(user_id: int, keys: list[dict]) -> InlineKeyboardMarkup:
@@ -1100,7 +1112,10 @@ def create_platform_download_keyboard(
             if p == "android":
                 clean_subscription_url = (subscription_url or "").strip()
                 if clean_subscription_url:
-                    activate_url = f"v2raytun://import/{clean_subscription_url}"
+                    parsed = urlparse(clean_subscription_url)
+                    if parsed.scheme and parsed.netloc:
+                        deeplink = f"v2raytun://import/{clean_subscription_url}"
+                        activate_url = f"{parsed.scheme}://{parsed.netloc}/url?url={quote(deeplink, safe='')}"
             else:
                 parsed = urlparse(subscription_url)
                 token = (parsed.path or "").rstrip("/").split("/")[-1].strip()

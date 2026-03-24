@@ -757,11 +757,54 @@ def create_webhook_app(bot_controller_instance):
 </html>"""
         return Response(html_body, mimetype="text/html")
 
+    @flask_app.route('/url', methods=['GET'])
+    def external_deeplink_redirect_route():
+        target = (request.args.get("url") or "").strip()
+        if not target:
+            return Response("Missing url", status=400, mimetype="text/plain")
+        allowed_schemes = ("v2raytun://", "happ://", "tg://", "https://", "http://")
+        if not any(target.startswith(prefix) for prefix in allowed_schemes):
+            return Response("Unsupported url scheme", status=400, mimetype="text/plain")
+        escaped_target = html_escape.escape(target, quote=True)
+        html_body = f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Открытие приложения</title>
+  <style>
+    body {{ margin:0; background:#000000; color:#eef2f7; font-family: Inter, -apple-system, Segoe UI, Roboto, sans-serif; }}
+    .wrap {{ max-width:560px; margin:10vh auto; padding:20px; }}
+    .card {{ background:#0a0a0a; border:1px solid #1b1b1b; border-radius:14px; padding:20px; }}
+    .btn {{ display:inline-block; margin-top:12px; padding:10px 14px; border-radius:10px; text-decoration:none; font-weight:600; }}
+    .btn-primary {{ background:#ffffff; color:#0f1115; }}
+    .muted {{ color:#9da3af; margin-top:10px; font-size:14px; }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h2 style="margin:0 0 10px;">🔗 Открытие приложения</h2>
+      <div>Если приложение не открылось автоматически, нажмите кнопку ниже.</div>
+      <a class="btn btn-primary" href="{escaped_target}">Открыть приложение</a>
+      <div class="muted">Используется HTTPS-обёртка для deeplink.</div>
+    </div>
+  </div>
+  <script>
+    const targetUrl = {json.dumps(target)};
+    setTimeout(() => {{
+      try {{ window.location.href = targetUrl; }} catch (_e) {{}}
+    }}, 120);
+  </script>
+</body>
+</html>"""
+        return Response(html_body, mimetype="text/html")
+
     @flask_app.route('/<token>', methods=['GET'])
     def unified_subscription_route_root(token: str):
         # Keep web panel routes intact: only handle token-like paths.
         panel_paths = {
-            "login", "logout", "dashboard", "monitor", "support", "users", "settings",
+            "login", "logout", "dashboard", "monitor", "support", "users", "settings", "url",
             "add-host", "add-plan", "brand-title", "button-constructor"
         }
         if token in panel_paths:
