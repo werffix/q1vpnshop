@@ -662,6 +662,7 @@ def create_webhook_app(bot_controller_instance):
             response.headers["profile-description"] = _header_utf8_via_latin1(
                 "Продлите подписку в боте - @q1vpn_bot"
             )
+            response.headers["subscription-userinfo"] = f"expire={int(datetime.now().timestamp())}"
             return response
 
         combined = "\n".join(merged_lines) + "\n"
@@ -676,6 +677,8 @@ def create_webhook_app(bot_controller_instance):
         # Hint clients (Happ/v2ray-like) to auto-refresh profile every 3 hours.
         response.headers["profile-update-interval"] = "3"
         response.headers["update-interval"] = "3"
+        if expiry_candidates:
+            response.headers["subscription-userinfo"] = f"expire={int(max(expiry_candidates))}"
         return response
 
     @flask_app.route('/sub/<token>', methods=['GET'])
