@@ -1072,7 +1072,7 @@ def create_platform_download_keyboard(
     if p == "android":
         builder.button(
             text="📥 Скачать приложение",
-            url="https://play.google.com/store/apps/details?id=com.happproxy"
+            url="https://play.google.com/store/apps/details?id=com.v2raytun.android&hl=ru"
         )
     elif p == "ios":
         builder.button(
@@ -1096,14 +1096,18 @@ def create_platform_download_keyboard(
     # Activation button should use redirect endpoint for instant jump to Happ.
     if subscription_url:
         try:
-            parsed = urlparse(subscription_url)
-            token = (parsed.path or "").rstrip("/").split("/")[-1].strip()
-            if token and parsed.scheme and parsed.netloc:
-                activate_url = f"{parsed.scheme}://{parsed.netloc}/redirect?token={token}"
-                builder.button(
-                    text="🔗 Активировать подписку",
-                    url=activate_url
-                )
+            activate_url = None
+            if p == "android":
+                clean_subscription_url = (subscription_url or "").strip()
+                if clean_subscription_url:
+                    activate_url = f"v2raytun://import/{clean_subscription_url}"
+            else:
+                parsed = urlparse(subscription_url)
+                token = (parsed.path or "").rstrip("/").split("/")[-1].strip()
+                if token and parsed.scheme and parsed.netloc:
+                    activate_url = f"{parsed.scheme}://{parsed.netloc}/redirect?token={token}"
+            if activate_url:
+                builder.button(text="🔗 Активировать подписку", url=activate_url)
         except Exception:
             pass
     builder.button(text="⬅️ Назад", callback_data="show_connect_menu")
