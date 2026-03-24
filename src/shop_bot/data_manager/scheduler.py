@@ -11,14 +11,18 @@ from aiogram import Bot
 
 from shop_bot.bot_controller import BotController
 from shop_bot.data_manager import database
-from shop_bot.data_manager import speedtest_runner
 from shop_bot.data_manager import backup_manager
 from shop_bot.data_manager import resource_monitor
 
 from shop_bot.modules import xui_api
 from shop_bot.bot import keyboards
 
-CHECK_INTERVAL_SECONDS = 300
+SCHEDULER_TICK_SECONDS = 20
+EXPIRY_CHECK_INTERVAL_SECONDS = 300
+PANEL_SYNC_INTERVAL_SECONDS = 320
+MONTHLY_RESET_CHECK_INTERVAL_SECONDS = 340
+METRICS_CHECK_INTERVAL_SECONDS = 360
+BACKUP_CHECK_INTERVAL_SECONDS = 380
 NOTIFY_BEFORE_HOURS = {48}
 notified_users = {}
 notified_user_marks: dict[int, set[int]] = {}
@@ -26,13 +30,11 @@ expired_notified_users: set[int] = set()
 
 logger = logging.getLogger(__name__)
 
-# Запуск обоих видов измерений 3 раза в сутки (каждые 8 часов)
-SPEEDTEST_INTERVAL_SECONDS = 8 * 3600
-_last_speedtests_run_at: datetime | None = None
 _last_backup_run_at: datetime | None = None
+_last_expiry_check_run_at: datetime | None = None
+_last_panel_sync_run_at: datetime | None = None
+_last_monthly_reset_check_run_at: datetime | None = None
 
-# Сбор метрик ресурсов (каждые 5 минут)
-METRICS_INTERVAL_SECONDS = 5 * 60
 _last_metrics_run_at: datetime | None = None
 
 # Monthly traffic reset marker key in bot_settings
@@ -450,76 +452,57 @@ async def _maybe_run_monthly_traffic_reset():
     database.update_setting(MONTHLY_TRAFFIC_RESET_KEY, current_ym)
 
 async def periodic_subscription_check(bot_controller: BotController):
+    global _last_expiry_check_run_at, _last_panel_sync_run_at, _last_monthly_reset_check_run_at
     logger.info("Scheduler: Планировщик фоновых задач запущен.")
     await asyncio.sleep(10)
 
     while True:
         try:
+            now = datetime.now()
             bot = bot_controller.get_bot_instance() if bot_controller.get_status().get("is_running") else None
-            if bot:
-                # First send expiry notifications based on current DB keys,
-                # then sync/remove expired clients on panels.
+            if bot and (
+                _last_expiry_check_run_at is None
+                or (now - _last_expiry_check_run_at).total_seconds() >= EXPIRY_CHECK_INTERVAL_SECONDS
+            ):
                 await check_expiring_subscriptions(bot)
-            else:
+                _last_expiry_check_run_at = now
+            elif not bot:
                 logger.debug("Scheduler: Бот остановлен, уведомления пользователям пропущены.")
 
-            await sync_keys_with_panels()
-            await _maybe_run_monthly_traffic_reset()
+            if (
+                _last_panel_sync_run_at is None
+                or (now - _last_panel_sync_run_at).total_seconds() >= PANEL_SYNC_INTERVAL_SECONDS
+            ):
+                await sync_keys_with_panels()
+                _last_panel_sync_run_at = now
 
-            # Периодические измерения скорости по всем хостам (оба варианта: SSH и сетевой)
-            await _maybe_run_periodic_speedtests()
-            await _maybe_collect_host_metrics()
+            if (
+                _last_monthly_reset_check_run_at is None
+                or (now - _last_monthly_reset_check_run_at).total_seconds() >= MONTHLY_RESET_CHECK_INTERVAL_SECONDS
+            ):
+                await _maybe_run_monthly_traffic_reset()
+                _last_monthly_reset_check_run_at = now
 
-            # Ежедневный автобэкап БД с отправкой админам
-            if bot:
+            if (
+                _last_metrics_run_at is None
+                or (now - _last_metrics_run_at).total_seconds() >= METRICS_CHECK_INTERVAL_SECONDS
+            ):
+                await _maybe_collect_host_metrics()
+
+            if (
+                bot
+                and (
+                    _last_backup_run_at is None
+                    or (now - _last_backup_run_at).total_seconds() >= BACKUP_CHECK_INTERVAL_SECONDS
+                )
+            ):
                 await _maybe_run_daily_backup(bot)
 
         except Exception as e:
             logger.error(f"Scheduler: Необработанная ошибка в основном цикле: {e}", exc_info=True)
             
-        logger.info(f"Scheduler: Цикл завершён. Следующая проверка через {CHECK_INTERVAL_SECONDS} сек.")
-        await asyncio.sleep(CHECK_INTERVAL_SECONDS)
-
-async def _maybe_run_periodic_speedtests():
-    global _last_speedtests_run_at
-    now = datetime.now()
-    if _last_speedtests_run_at and (now - _last_speedtests_run_at).total_seconds() < SPEEDTEST_INTERVAL_SECONDS:
-        return
-    try:
-        await _run_speedtests_for_all_hosts()
-        _last_speedtests_run_at = now
-    except Exception as e:
-        logger.error(f"Scheduler: Ошибка запуска speedtests: {e}", exc_info=True)
-
-async def _run_speedtests_for_all_hosts():
-    hosts = database.get_all_hosts()
-    if not hosts:
-        logger.debug("Scheduler: Нет хостов для измерений скорости.")
-        return
-    logger.info(f"Scheduler: Запускаю speedtest для {len(hosts)} хост(ов)...")
-    for h in hosts:
-        host_name = h.get('host_name')
-        if not host_name:
-            continue
-        try:
-            logger.info(f"Scheduler: Speedtest для '{host_name}' запущен...")
-            # Ограничим каждый хост таймаутом, чтобы не зависнуть надолго
-            try:
-                async with asyncio.timeout(180):
-                    res = await speedtest_runner.run_both_for_host(host_name)
-            except AttributeError:
-                # Для Python <3.11: fallback через wait_for
-                res = await asyncio.wait_for(speedtest_runner.run_both_for_host(host_name), timeout=180)
-            ok = res.get('ok')
-            err = res.get('error')
-            if ok:
-                logger.info(f"Scheduler: Speedtest для '{host_name}' завершён успешно")
-            else:
-                logger.warning(f"Scheduler: Speedtest для '{host_name}' завершён с ошибками: {err}")
-        except asyncio.TimeoutError:
-            logger.warning(f"Scheduler: Таймаут speedtest для хоста '{host_name}'")
-        except Exception as e:
-            logger.error(f"Scheduler: Ошибка выполнения speedtest для '{host_name}': {e}", exc_info=True)
+        logger.info(f"Scheduler: Тик завершён. Следующая проверка через {SCHEDULER_TICK_SECONDS} сек.")
+        await asyncio.sleep(SCHEDULER_TICK_SECONDS)
 
 async def _maybe_run_daily_backup(bot: Bot):
     global _last_backup_run_at
@@ -553,8 +536,6 @@ async def _maybe_run_daily_backup(bot: Bot):
 async def _maybe_collect_host_metrics():
     global _last_metrics_run_at
     now = datetime.now()
-    if _last_metrics_run_at and (now - _last_metrics_run_at).total_seconds() < METRICS_INTERVAL_SECONDS:
-        return
     
     # Собираем локальные метрики
     try:

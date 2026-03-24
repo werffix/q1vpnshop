@@ -1088,17 +1088,13 @@ def create_platform_download_keyboard(
         )
     elif p == "ios":
         builder.button(
-            text="📥 Скачать из AppStore Россия",
-            url="https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973"
-        )
-        builder.button(
-            text="📥 Скачать из AppStore Global",
-            url="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"
+            text="📥 Скачать из AppStore",
+            url="https://apps.apple.com/ru/app/v2raytun/id6476628951"
         )
     elif p == "windows":
         builder.button(
             text="📥 Скачать программу",
-            url="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe"
+            url="https://github.com/mdf45/v2raytun/releases"
         )
     elif p == "linux":
         builder.button(
@@ -1109,7 +1105,7 @@ def create_platform_download_keyboard(
     if subscription_url:
         try:
             activate_url = None
-            if p == "android":
+            if p in {"android", "ios", "windows"}:
                 clean_subscription_url = (subscription_url or "").strip()
                 if clean_subscription_url:
                     parsed = urlparse(clean_subscription_url)

@@ -430,7 +430,7 @@ def get_admin_router() -> Router:
                 continue
             used = int(result.get("used") or 0)
             online = int(result.get("online") or 0)
-            traffic_lines.append(f"{prefix} {host_name} (онлайн: {online}): {_format_traffic_gb(used)}")
+            traffic_lines.append(f"{prefix} {host_name} (онлайн: {online}): потрачено {_format_traffic_gb(used)}")
         traffic_block = (
             "🌐 <b>Использование трафика (общее):</b>\n" + "\n".join(traffic_lines)
             if traffic_lines
