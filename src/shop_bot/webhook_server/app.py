@@ -687,6 +687,12 @@ def create_webhook_app(bot_controller_instance):
 
     @flask_app.route('/redirect', methods=['GET'])
     def happ_redirect_route():
+        def _current_sub_url(token_value: str) -> str:
+            parsed = urllib.parse.urlparse(request.host_url)
+            scheme = parsed.scheme or "https"
+            netloc = parsed.netloc or request.host or ""
+            return f"{scheme}://{netloc}/sub/{token_value}"
+
         direct_to = (request.args.get("to") or "").strip()
         if direct_to.startswith("happ://"):
             return redirect(direct_to, code=302)
@@ -694,7 +700,7 @@ def create_webhook_app(bot_controller_instance):
         token = (request.args.get("token") or "").strip().strip("<>")
         if not token:
             return Response("Missing token", status=400, mimetype="text/plain")
-        sub_url = f"https://q1.servernux.com:8443/sub/{token}"
+        sub_url = _current_sub_url(token)
         crypto_link, error = _request_happ_crypto_url(sub_url)
         if not crypto_link:
             logger.warning(f"redirect: failed to build happ crypto link: {error}")
@@ -703,8 +709,14 @@ def create_webhook_app(bot_controller_instance):
 
     @flask_app.route('/activate/<token>', methods=['GET'])
     def activate_subscription_route(token: str):
+        def _current_sub_url(token_value: str) -> str:
+            parsed = urllib.parse.urlparse(request.host_url)
+            scheme = parsed.scheme or "https"
+            netloc = parsed.netloc or request.host or ""
+            return f"{scheme}://{netloc}/sub/{token_value}"
+
         clean_token = (token or "").strip().strip("<>")
-        sub_url = f"https://q1.servernux.com:8443/sub/{clean_token}"
+        sub_url = _current_sub_url(clean_token)
         crypto_link, error = _request_happ_crypto_url(sub_url)
         if not crypto_link:
             logger.warning(f"activate: failed to build happ crypto link: {error}")
