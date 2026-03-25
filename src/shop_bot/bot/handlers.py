@@ -121,21 +121,6 @@ def _get_unified_subscription_url_for_user(user_id: int) -> str | None:
         return None
 
 async def _get_connect_subscription_url_from_subscription_1(user_id: int) -> str | None:
-    # Prefer first saved key ("подписка #1"), fallback to stored/global unified URL.
-    try:
-        keys = get_user_keys(user_id) or []
-        if keys:
-            key_1 = keys[0]
-            details = await xui_api.get_key_details_from_host(key_1)
-            if details and details.get("connection_string"):
-                return details.get("connection_string")
-    except Exception:
-        pass
-
-    user_data = get_user(user_id) or {}
-    saved_link = (user_data.get("subscription_link") or "").strip()
-    if saved_link:
-        return saved_link
     return _get_unified_subscription_url_for_user(user_id)
 
 async def _apply_bonus_days_to_user(user_id: int, days: int) -> int:
