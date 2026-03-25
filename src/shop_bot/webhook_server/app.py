@@ -45,7 +45,7 @@ from shop_bot.data_manager.database import (
     get_all_keys, get_keys_for_user, get_key_by_id, delete_key_by_id, update_key_comment, update_key_info,
     add_new_key, get_balance, adjust_user_balance, get_referrals_for_user,
     get_user, get_key_by_email, get_host, get_or_create_user_subscription_uuid, reset_user_state,
-    move_host_order, update_host_is_expired, get_user_device_limit, adjust_user_device_limit,
+    move_host_order, update_host_is_expired, update_host_is_sub, get_user_device_limit, adjust_user_device_limit,
     get_all_traffic_packages, create_traffic_package, update_traffic_package, delete_traffic_package,
 )
 
@@ -2344,6 +2344,23 @@ def create_webhook_app(bot_controller_instance):
         flash('Режим хоста обновлён.' if ok else 'Не удалось обновить режим хоста.', 'success' if ok else 'danger')
         return redirect(url_for('settings_page', tab='hosts'))
 
+    @flask_app.route('/update-host-sub', methods=['POST'])
+    @login_required
+    def update_host_sub_route():
+        host_name = (request.form.get('host_name') or '').strip()
+        value = (request.form.get('is_sub_host') or '').strip()
+        if not host_name:
+            flash('Не указан хост для обновления режима САБ.', 'warning')
+            return redirect(url_for('settings_page', tab='hosts'))
+        ok = update_host_is_sub(host_name, value in {"1", "true", "on", "yes"})
+        flash(
+            'САБ-хост обновлён. Общая подписка теперь строится через выбранный сервер.'
+            if ok else
+            'Не удалось обновить режим САБ.',
+            'success' if ok else 'danger'
+        )
+        return redirect(url_for('settings_page', tab='hosts'))
+
     @flask_app.route('/rename-host', methods=['POST'])
     @login_required
     def rename_host_route():
@@ -2592,6 +2609,7 @@ def create_webhook_app(bot_controller_instance):
     def add_host_route():
         host_name = request.form['host_name']
         is_expired_host = (request.form.get('is_expired_host') or '').strip().lower() in {"1", "true", "on", "yes"}
+        is_sub_host = (request.form.get('is_sub_host') or '').strip().lower() in {"1", "true", "on", "yes"}
         create_host(
             name=host_name,
             url=request.form['host_url'],
@@ -2601,6 +2619,7 @@ def create_webhook_app(bot_controller_instance):
             subscription_url=(request.form.get('host_subscription_url') or '').strip() or None,
             client_monthly_traffic_gb=(request.form.get('client_monthly_traffic_gb') or '').strip() or None,
             is_expired_host=is_expired_host,
+            is_sub_host=is_sub_host,
         )
 
         migrated_users = 0

@@ -91,6 +91,7 @@ def initialize_db():
                     host_inbound_id INTEGER NOT NULL,
                     host_order INTEGER,
                     is_expired_host INTEGER NOT NULL DEFAULT 0,
+                    is_sub_host INTEGER NOT NULL DEFAULT 0,
                     subscription_url TEXT,
                     client_monthly_traffic_gb REAL,
                     ssh_host TEXT,
@@ -844,6 +845,9 @@ def run_migration():
                 logging.info(" -> Столбец 'client_monthly_traffic_gb' успешно добавлен в 'xui_hosts'.")
             else:
                 logging.info(" -> Столбец 'client_monthly_traffic_gb' уже существует в 'xui_hosts'.")
+            if 'is_sub_host' not in xh_columns:
+                cursor.execute("ALTER TABLE xui_hosts ADD COLUMN is_sub_host INTEGER NOT NULL DEFAULT 0")
+                logging.info(" -> Столбец 'is_sub_host' успешно добавлен в 'xui_hosts'.")
             # SSH settings for speedtests (optional)
             if 'ssh_host' not in xh_columns:
                 cursor.execute("ALTER TABLE xui_hosts ADD COLUMN ssh_host TEXT")
@@ -1084,6 +1088,7 @@ def create_host(
     subscription_url: str | None = None,
     client_monthly_traffic_gb: float | None = None,
     is_expired_host: bool | int = False,
+    is_sub_host: bool | int = False,
 ):
     try:
         name = normalize_host_name(name)
@@ -1100,15 +1105,18 @@ def create_host(
         except Exception:
             client_monthly_traffic_gb = None
         is_expired_host = 1 if str(is_expired_host).lower() in ("1", "true", "on", "yes") else 0
+        is_sub_host = 1 if str(is_sub_host).lower() in ("1", "true", "on", "yes") else 0
 
         with sqlite3.connect(DB_FILE) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT COALESCE(MAX(host_order), 0) + 1 FROM xui_hosts")
             next_order = cursor.fetchone()[0] or 1
+            if is_sub_host:
+                cursor.execute("UPDATE xui_hosts SET is_sub_host = 0")
             try:
                 cursor.execute(
-                    "INSERT INTO xui_hosts (host_name, host_url, host_username, host_pass, host_inbound_id, host_order, is_expired_host, subscription_url, client_monthly_traffic_gb) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (name, url, user, passwd, inbound, next_order, is_expired_host, subscription_url, client_monthly_traffic_gb)
+                    "INSERT INTO xui_hosts (host_name, host_url, host_username, host_pass, host_inbound_id, host_order, is_expired_host, subscription_url, client_monthly_traffic_gb, is_sub_host) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (name, url, user, passwd, inbound, next_order, is_expired_host, subscription_url, client_monthly_traffic_gb, is_sub_host)
                 )
             except sqlite3.OperationalОшибка:
                 cursor.execute(
@@ -1187,6 +1195,52 @@ def update_host_is_expired(host_name: str, is_expired_host: bool | int) -> bool:
     except sqlite3.Error as e:
         logging.error(f"Не удалось обновить is_expired_host для хоста '{host_name}': {e}")
         return False
+
+def update_host_is_sub(host_name: str, is_sub_host: bool | int) -> bool:
+    try:
+        host_name = normalize_host_name(host_name)
+        value = 1 if str(is_sub_host).lower() in ("1", "true", "on", "yes") else 0
+        with sqlite3.connect(DB_FILE) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name,))
+            exists = cursor.fetchone() is not None
+            if not exists:
+                logging.warning(f"update_host_is_sub: хост '{host_name}' не найден")
+                return False
+            if value:
+                cursor.execute("UPDATE xui_hosts SET is_sub_host = 0")
+            cursor.execute(
+                "UPDATE xui_hosts SET is_sub_host = ? WHERE TRIM(host_name) = TRIM(?)",
+                (value, host_name)
+            )
+            conn.commit()
+            return True
+    except sqlite3.Error as e:
+        logging.error(f"Не удалось обновить is_sub_host для хоста '{host_name}': {e}")
+        return False
+
+def get_sub_host() -> dict | None:
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM xui_hosts
+                WHERE COALESCE(is_sub_host, 0) = 1
+                ORDER BY COALESCE(host_order, 999999999), rowid
+                LIMIT 1
+                """
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            d["host_name"] = normalize_host_name(d.get("host_name"))
+            return d
+    except sqlite3.Error as e:
+        logging.error(f"Не удалось получить САБ-хост: {e}")
+        return None
 
 def set_referral_start_bonus_received(user_id: int) -> bool:
     """Пометить, что пользователь получил стартовый бонус за реферальную регистрацию."""

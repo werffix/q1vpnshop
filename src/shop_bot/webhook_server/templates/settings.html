@@ -146,6 +146,11 @@
 								<label class="form-check-label" for="is_expired_host">Истек</label>
 								<small>Служебный хост для истекших подписок: клиент создается выключенным и не показывается как ключ пользователю.</small>
 							</div>
+							<div class="form-group form-check">
+								<input type="checkbox" class="form-check-input" id="is_sub_host" name="is_sub_host" value="1" />
+								<label class="form-check-label" for="is_sub_host">САБ</label>
+								<small>Можно включить только на одном хосте. Именно через этот сервер будет строиться общая саб-ссылка со всеми серверами.</small>
+							</div>
 							<button type="submit" class="btn btn-primary">Добавить</button>
 						</form>
 					</div>
@@ -222,6 +227,15 @@
 						Истек
 					</label>
 					<button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить режим</button>
+				</form>
+				<form action="{{ url_for('update_host_sub_route') }}" method="post" class="form-inline" style="margin: 8px 0;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+					<input type="hidden" name="host_name" value="{{ host.host_name }}" />
+					<label class="form-check-label" style="margin-right:8px;">
+						<input type="checkbox" name="is_sub_host" value="1" {% if host.is_sub_host %}checked{% endif %} />
+						САБ
+					</label>
+					<button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить САБ</button>
 				</form>
                 <!-- SSH настройки для speedtest на удалённом хосте -->
                 <div class="card glass" style="margin: 8px 0;">

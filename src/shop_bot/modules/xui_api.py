@@ -14,6 +14,7 @@ from py3xui import Api, Client, Inbound
 from shop_bot.data_manager.database import (
     get_host,
     get_all_hosts,
+    get_sub_host,
     get_key_by_email,
     get_setting,
     get_user_device_limit,
@@ -230,10 +231,23 @@ def resolve_user_id_by_persistent_subscription_token(token: str) -> int | None:
         return None
 
 def build_unified_subscription_url(user_id: int, base_domain: str | None = None) -> str | None:
-    domain = (base_domain or get_setting("domain") or "").strip()
+    token = get_or_create_user_subscription_token(user_id)
+    domain = (base_domain or "").strip()
+    if not domain:
+        try:
+            sub_host = get_sub_host()
+        except Exception:
+            sub_host = None
+        if sub_host:
+            domain = (
+                str(sub_host.get("subscription_url") or "").strip()
+                or str(sub_host.get("host_url") or "").strip()
+            )
+    if not domain:
+        domain = (get_setting("domain") or "").strip()
     if not domain:
         return None
-    token = get_or_create_user_subscription_token(user_id)
+
     candidate = domain if "://" in domain else f"https://{domain}"
 
     # Support explicit templates like https://sub.example.com/sub/{token}
