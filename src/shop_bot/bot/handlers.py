@@ -121,6 +121,9 @@ def _get_unified_subscription_url_for_user(user_id: int) -> str | None:
         return None
 
 async def _get_connect_subscription_url_from_subscription_1(user_id: int) -> str | None:
+    # Always build the current unified subscription URL dynamically.
+    # The selected host with flag "САБ" determines which host-specific
+    # subscription base will be shown to the user.
     return _get_unified_subscription_url_for_user(user_id)
 
 async def _apply_bonus_days_to_user(user_id: int, days: int) -> int:

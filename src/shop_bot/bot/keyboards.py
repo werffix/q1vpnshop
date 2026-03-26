@@ -433,6 +433,7 @@ def create_admin_users_keyboard(users: list[dict], page: int = 0, page_size: int
         username = u.get('username') or '—'
         title = f"@{username} - {user_id}" if username != '—' else f"{user_id}"
         builder.button(text=title, callback_data=f"admin_view_user_{user_id}")
+    builder.button(text="🎁 Выдать всем подписку", callback_data="admin_grant_all_subscriptions")
     builder.button(text="🔍 Поиск", callback_data="admin_users_search")
     # pagination
     total = len(users)
@@ -445,7 +446,7 @@ def create_admin_users_keyboard(users: list[dict], page: int = 0, page_size: int
     builder.button(text="⬅️ В админ-меню", callback_data="admin_menu")
     # layout: list, search, pagination, back
     rows = [1] * len(users[start:end])
-    tail = [1]
+    tail = [1, 1]
     if have_prev or have_next:
         tail.append(2 if (have_prev and have_next) else 1)
     tail.append(1)

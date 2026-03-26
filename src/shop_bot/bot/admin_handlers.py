@@ -3,6 +3,7 @@ import asyncio
 import time
 import uuid
 import re
+import hashlib
 import html as html_escape
 import json
 import urllib.parse
@@ -48,6 +49,8 @@ from shop_bot.data_manager.database import (
     get_referral_count,
     get_referral_balance_all,
     get_referrals_for_user,
+    get_or_create_user_subscription_uuid,
+    update_user_subscription_state,
     # Promo API
     create_promo_code,
     list_promo_codes,
@@ -114,6 +117,10 @@ class AdminUserMessage(StatesGroup):
 
 class AdminSubscriptionDate(StatesGroup):
     waiting_datetime = State()
+
+
+class AdminGrantAllSubscriptions(StatesGroup):
+    waiting_days = State()
 
 
 _ADMIN_USER_SEARCH_CACHE: dict[int, str] = {}
@@ -322,6 +329,88 @@ def get_admin_router() -> Router:
             _ADMIN_USER_SEARCH_CACHE[int(admin_id)] = str(query)
             return str(query)
         return _ADMIN_USER_SEARCH_CACHE.get(int(admin_id))
+
+    def _subscription_email_for_user_host(user_id: int, host_name: str) -> str:
+        host_part = re.sub(r"[^a-z0-9]+", "", (host_name or "").lower())[:8] or "host"
+        digest = hashlib.sha1(f"{user_id}:{host_name}".encode("utf-8")).hexdigest()[:10]
+        return f"u{user_id}.{host_part}.{digest}@bot.local"
+
+    async def _grant_subscription_to_user_on_all_hosts(user_id: int, days: int) -> tuple[int, datetime | None]:
+        hosts = [h for h in (get_all_hosts() or []) if int(h.get("is_expired_host") or 0) != 1]
+        if not hosts:
+            return 0, None
+
+        user_uuid = get_or_create_user_subscription_uuid(user_id)
+        now_dt = datetime.now()
+        updated = 0
+        latest_expiry: datetime | None = None
+
+        for host in hosts:
+            host_name = str(host.get("host_name") or "").strip()
+            if not host_name:
+                continue
+            stable_email = _subscription_email_for_user_host(user_id, host_name)
+            existing_key = get_key_by_email(stable_email)
+            base_expiry_dt = now_dt
+            if existing_key:
+                try:
+                    raw_expiry = existing_key.get("expiry_date")
+                    if raw_expiry:
+                        current_expiry = datetime.fromisoformat(str(raw_expiry))
+                        if current_expiry > base_expiry_dt:
+                            base_expiry_dt = current_expiry
+                except Exception:
+                    pass
+            target_expiry_dt = base_expiry_dt + timedelta(days=days)
+            target_expiry_ms = int(target_expiry_dt.timestamp() * 1000)
+            try:
+                result = await create_or_update_key_on_host(
+                    host_name=host_name,
+                    email=stable_email,
+                    days_to_add=None,
+                    expiry_timestamp_ms=target_expiry_ms,
+                    preferred_uuid=user_uuid,
+                )
+            except Exception as e:
+                logger.warning(f"admin_grant_all: user={user_id}, host={host_name}: {e}")
+                continue
+            if not result:
+                continue
+            existing_key = get_key_by_email(result.get("email") or stable_email)
+            if existing_key:
+                update_key_info(
+                    int(existing_key.get("key_id")),
+                    result.get("client_uuid") or existing_key.get("xui_client_uuid") or "",
+                    int(result.get("expiry_timestamp_ms") or target_expiry_ms),
+                )
+            else:
+                add_new_key(
+                    user_id=user_id,
+                    host_name=host_name,
+                    xui_client_uuid=result.get("client_uuid"),
+                    key_email=result.get("email") or stable_email,
+                    expiry_timestamp_ms=int(result.get("expiry_timestamp_ms") or target_expiry_ms),
+                )
+            updated += 1
+            try:
+                expiry_dt = datetime.fromtimestamp(int(result.get("expiry_timestamp_ms") or target_expiry_ms) / 1000)
+                if latest_expiry is None or expiry_dt > latest_expiry:
+                    latest_expiry = expiry_dt
+            except Exception:
+                pass
+
+        if updated > 0:
+            try:
+                update_user_subscription_state(
+                    user_id,
+                    subscription_link=build_unified_subscription_url(user_id),
+                    subscription_status="active",
+                    subscription_type="paid",
+                    subscription_expires_at=latest_expiry,
+                )
+            except Exception:
+                pass
+        return updated, latest_expiry
 
     async def _render_admin_user_card(user_id: int) -> tuple[str, types.InlineKeyboardMarkup] | tuple[None, None]:
         user = get_user(user_id)
@@ -1508,6 +1597,82 @@ def get_admin_router() -> Router:
             callback.message,
             "🔍 <b>Поиск пользователя</b>\n\nОтправьте @username или Telegram ID.",
             reply_markup=keyboards.create_admin_cancel_keyboard()
+        )
+
+    @admin_router.callback_query(F.data == "admin_grant_all_subscriptions")
+    async def admin_grant_all_subscriptions_prompt(callback: types.CallbackQuery, state: FSMContext):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("У вас нет прав.", show_alert=True)
+            return
+        await callback.answer()
+        await state.set_state(AdminGrantAllSubscriptions.waiting_days)
+        await _safe_edit_or_send(
+            callback.message,
+            (
+                "🎁 <b>Выдать всем подписку</b>\n\n"
+                "Введите количество дней.\n"
+                "Если у пользователя уже есть активная подписка, она будет продлена.\n"
+                "Если подписки нет — будет создана новая."
+            ),
+            reply_markup=keyboards.create_admin_cancel_keyboard()
+        )
+
+    @admin_router.message(AdminGrantAllSubscriptions.waiting_days)
+    async def admin_grant_all_subscriptions_process(message: types.Message, state: FSMContext):
+        if not is_admin(message.from_user.id):
+            return
+        raw_value = (message.text or "").strip()
+        try:
+            days = int(raw_value)
+        except Exception:
+            await message.answer("❌ Введите целое число дней.")
+            return
+        if days <= 0:
+            await message.answer("❌ Количество дней должно быть больше нуля.")
+            return
+
+        await state.clear()
+        users = get_all_users() or []
+        if not users:
+            await message.answer("❌ Пользователи не найдены.")
+            return
+
+        progress = await message.answer(f"⏳ Выдаю подписку всем пользователям на {days} дн...")
+        success_users = 0
+        failed_users = 0
+
+        for user in users:
+            try:
+                user_id = int(user.get("telegram_id") or user.get("user_id") or 0)
+            except Exception:
+                user_id = 0
+            if user_id <= 0:
+                continue
+            try:
+                updated, latest_expiry = await _grant_subscription_to_user_on_all_hosts(user_id, days)
+                if updated > 0:
+                    success_users += 1
+                    try:
+                        expiry_text = latest_expiry.strftime("%d.%m.%Y в %H:%M") if latest_expiry else "—"
+                        await message.bot.send_message(
+                            user_id,
+                            (
+                                "🔐 Ваша подписка продлена администратором.\n"
+                                f"⏳ Действует до: {expiry_text}"
+                            ),
+                        )
+                    except Exception:
+                        pass
+                else:
+                    failed_users += 1
+            except Exception as e:
+                failed_users += 1
+                logger.warning(f"admin_grant_all_subscriptions: user={user_id}: {e}")
+
+        await progress.edit_text(
+            "✅ Массовая выдача завершена.\n\n"
+            f"Успешно обработано пользователей: {success_users}\n"
+            f"С ошибкой: {failed_users}"
         )
 
     @admin_router.message(AdminUsersSearch.waiting_query)
