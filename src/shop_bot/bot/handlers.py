@@ -556,6 +556,7 @@ async def show_main_menu(message: types.Message, edit_message: bool = False):
     user_id = message.chat.id
     user_db_data = get_user(user_id)
     user_keys = get_user_keys(user_id)
+    connect_url = _get_unified_subscription_url_for_user(user_id)
     
     trial_available = not (user_db_data and user_db_data.get('trial_used'))
     # Trial is available only before first paid subscription.
@@ -577,7 +578,8 @@ async def show_main_menu(message: types.Message, edit_message: bool = False):
         user_keys,
         trial_available,
         is_admin_flag,
-        has_active_subscription=has_active_subscription
+        has_active_subscription=has_active_subscription,
+        connect_url=connect_url,
     )
     logo_path = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "..", "..", "logo", "vpnbot.jpg")
@@ -936,7 +938,10 @@ def get_user_router() -> Router:
         await _safe_edit_or_send(
             callback.message,
             final_text,
-            reply_markup=keyboards.create_profile_keyboard(show_renew_button=bool(active_keys))
+            reply_markup=keyboards.create_profile_keyboard(
+                show_renew_button=bool(active_keys),
+                connect_url=_get_unified_subscription_url_for_user(user_id),
+            )
         )
 
     @user_router.callback_query(F.data == "manage_subscription")
@@ -2624,10 +2629,21 @@ def get_user_router() -> Router:
     @registration_required
     async def show_connect_menu_handler(callback: types.CallbackQuery):
         await callback.answer()
+        sub_url = _get_unified_subscription_url_for_user(callback.from_user.id)
+        if not sub_url:
+            await _safe_edit_or_send(
+                callback.message,
+                "❌ Активная подписка не найдена. Сначала оформите подписку.",
+                reply_markup=keyboards.create_vpn_benefits_keyboard("buy")
+            )
+            return
         await _safe_edit_or_send(
             callback.message,
-            "Выберите устройство, которое хотите подключить:",
-            reply_markup=keyboards.create_connect_devices_keyboard()
+            "🔗 <b>Ваша Remna-подписка</b>\n\n"
+            "Откройте ссылку ниже, чтобы перейти на страницу подписки Remnawave.\n\n"
+            f"{html.code(sub_url)}",
+            reply_markup=keyboards.create_direct_connect_keyboard(sub_url),
+            disable_web_page_preview=True,
         )
 
     @user_router.callback_query(F.data == "buy_subscription_start")

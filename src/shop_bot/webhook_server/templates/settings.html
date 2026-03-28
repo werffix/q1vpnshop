@@ -1,11 +1,11 @@
-{% extends "base.html" %} {% block title %}Настройки Бота и Хостов{% endblock %}
+{% extends "base.html" %} {% block title %}Настройки Бота и Remna{% endblock %}
 {% block content %}
 
 <div class="page-header d-print-none">
   <div class="row align-items-center">
     <div class="col">
       <h2 class="page-title">Настройки</h2>
-      <div class="text-secondary">Панель, боты, платежи, хосты и контент</div>
+      <div class="text-secondary">Панель, боты, платежи, Remna и контент</div>
     </div>
   </div>
   <div class="hr-text"></div>
@@ -33,7 +33,7 @@
       <li class="nav-item"><a class="nav-link" href="#bot">Бот</a></li>
       <li class="nav-item"><a class="nav-link" href="#support-bot">Support-бот</a></li>
       <li class="nav-item"><a class="nav-link" href="#payments">Платежи</a></li>
-      <li class="nav-item"><a class="nav-link" href="#hosts">Хосты</a></li>
+      <li class="nav-item"><a class="nav-link" href="#hosts">Remna</a></li>
       <li class="nav-item"><a class="nav-link" href="#plans">Тарифы</a></li>
       <li class="nav-item"><a class="nav-link" href="#referrals">Рефералы</a></li>
       <li class="nav-item"><a class="nav-link" href="#trial">Триал</a></li>
@@ -102,54 +102,46 @@
 <div class="settings-container">
 	<div class="settings-column-left">
 		<section class="settings-section" id="hosts">
-			<h2>Управление Хостами (Серверами)</h2>
+			<h2>Настройки Remnawave</h2>
 
 			<div class="row g-3 align-items-start">
 				<div class="col-12 col-lg-5">
 					<div class="host-card">
-						<h4>Добавить новый хост</h4>
+						<h4>Добавить Remna-подключение</h4>
 						<form action="{{ url_for('add_host_route') }}" method="post">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
 							<div class="form-group">
-								<label for="host_name">Название хоста:</label>
+								<label for="host_name">Название записи:</label>
 								<input type="text" id="host_name" name="host_name" required />
 							</div>
 							<div class="form-group">
-								<label for="host_url">URL панели XUI:</label>
-								<input type="url" id="host_url" name="host_url" placeholder="http://123.45.67.89:54321" required />
+								<label for="host_url">URL панели Remnawave:</label>
+								<input type="url" id="host_url" name="host_url" placeholder="https://panel.example.com" required />
 							</div>
 							<div class="form-group">
-								<label for="host_username">Логин XUI:</label>
-								<input type="text" id="host_username" name="host_username" required />
+								<label for="remna_api_token">API token Remnawave:</label>
+								<input type="text" id="remna_api_token" name="remna_api_token" required />
+								<small>Создаётся в панели Remnawave в разделе API Tokens.</small>
 							</div>
 							<div class="form-group password-wrapper">
-								<label for="host_pass">Пароль XUI:</label>
-								<input type="password" id="host_pass" name="host_pass" required />
+								<label for="remna_caddy_api_key">Caddy / X-Api-Key (опционально):</label>
+								<input type="password" id="remna_caddy_api_key" name="remna_caddy_api_key" />
 								<button type="button" class="toggle-password">👁️</button>
 							</div>
 							<div class="form-group">
-								<label for="host_inbound_id">ID входящего подключения:</label>
-								<input type="number" id="host_inbound_id" name="host_inbound_id" required />
-							</div>
-							<div class="form-group">
-								<label for="host_subscription_url">Ссылка подписки для этого хоста (Обязательно):</label>
+								<label for="host_subscription_url">Публичная ссылка подписки (опционально):</label>
 								<input type="text" id="host_subscription_url" name="host_subscription_url" placeholder="например, https://sub.example.com/{token}" />
-								<small>Укажите ссылку на подписку для этого хоста.</small>
+								<small>Оставьте пустым, если Remnawave сам возвращает корректный `subscriptionUrl`.</small>
 							</div>
 							<div class="form-group">
 								<label for="client_monthly_traffic_gb">Лимит трафика на клиента в месяц (GB):</label>
 								<input type="number" step="0.1" min="0" id="client_monthly_traffic_gb" name="client_monthly_traffic_gb" placeholder="например, 100" />
-								<small>0 или пусто — без лимита. Сброс рассчитывается помесячно в логике панели/клиента.</small>
-							</div>
-							<div class="form-group form-check">
-								<input type="checkbox" class="form-check-input" id="is_expired_host" name="is_expired_host" value="1" />
-								<label class="form-check-label" for="is_expired_host">Истек</label>
-								<small>Служебный хост для истекших подписок: клиент создается выключенным и не показывается как ключ пользователю.</small>
+								<small>Если задан, бот будет выставлять лимит и стратегию месячного сброса в Remnawave.</small>
 							</div>
 							<div class="form-group form-check">
 								<input type="checkbox" class="form-check-input" id="is_sub_host" name="is_sub_host" value="1" />
-								<label class="form-check-label" for="is_sub_host">САБ</label>
-								<small>Можно включить только на одном хосте. Именно через этот сервер будет строиться общая саб-ссылка со всеми серверами.</small>
+								<label class="form-check-label" for="is_sub_host">Основная Remna</label>
+								<small>Если записей несколько, именно эта будет использоваться для выдачи общей Remna-подписки.</small>
 							</div>
 							<button type="submit" class="btn btn-primary">Добавить</button>
 						</form>
@@ -182,11 +174,11 @@
 					</form>
                     </div>
 				</div>
-				<!-- Редактирование URL панели XUI -->
+				<!-- Редактирование URL панели Remnawave -->
 				<form action="{{ url_for('update_host_url_route') }}" method="post" class="form-inline edit-row" data-edit-row>
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
 					<input type="hidden" name="host_name" value="{{ host.host_name }}" />
-					<label class="form-label" for="host_url_{{ loop.index }}">URL панели XUI:</label>
+					<label class="form-label" for="host_url_{{ loop.index }}">URL панели Remnawave:</label>
 					<input id="host_url_{{ loop.index }}" class="form-control pill" type="text" name="host_url" value="{{ host.host_url or '' }}" data-edit-target readonly />
 					<div class="edit-actions">
 						<button type="button" class="btn btn-outline-secondary btn-sm pill" data-action="edit">Редактировать</button>
@@ -207,10 +199,22 @@
 						<button type="button" class="btn btn-outline-secondary btn-sm pill d-none" data-action="cancel">Отмена</button>
 					</div>
 				</form>
+				<form action="{{ url_for('update_host_remna_api_token_route') }}" method="post" class="form-inline" style="margin: 8px 0;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+					<input type="hidden" name="host_name" value="{{ host.host_name }}" />
+					<input class="form-control pill" type="text" name="remna_api_token" placeholder="API token Remna" value="{{ host.remna_api_token or '' }}" />
+					<button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить token</button>
+				</form>
+				<form action="{{ url_for('update_host_remna_caddy_api_key_route') }}" method="post" class="form-inline" style="margin: 8px 0;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+					<input type="hidden" name="host_name" value="{{ host.host_name }}" />
+					<input class="form-control pill" type="password" name="remna_caddy_api_key" placeholder="Caddy / X-Api-Key" value="{{ host.remna_caddy_api_key or '' }}" />
+					<button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить X-Api-Key</button>
+				</form>
 				<form action="{{ url_for('update_host_subscription_route') }}" method="post" class="form-inline" style="margin: 8px 0;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
 					<input type="hidden" name="host_name" value="{{ host.host_name }}" />
-					<input class="form-control pill" type="text" name="host_subscription_url" placeholder="Ссылка подписки для этого хоста" value="{{ host.subscription_url or '' }}" />
+					<input class="form-control pill" type="text" name="host_subscription_url" placeholder="Публичная ссылка подписки" value="{{ host.subscription_url or '' }}" />
 					<button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить ссылку</button>
 				</form>
 				<form action="{{ url_for('update_host_traffic_route') }}" method="post" class="form-inline" style="margin: 8px 0;">
@@ -219,23 +223,14 @@
 					<input class="form-control pill" type="number" step="0.1" min="0" name="client_monthly_traffic_gb" placeholder="Лимит трафика на клиента в месяц (GB)" value="{{ host.client_monthly_traffic_gb or '' }}" />
 					<button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить лимит</button>
 				</form>
-				<form action="{{ url_for('update_host_expired_route') }}" method="post" class="form-inline" style="margin: 8px 0;">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-					<input type="hidden" name="host_name" value="{{ host.host_name }}" />
-					<label class="form-check-label" style="margin-right:8px;">
-						<input type="checkbox" name="is_expired_host" value="1" {% if host.is_expired_host %}checked{% endif %} />
-						Истек
-					</label>
-					<button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить режим</button>
-				</form>
 				<form action="{{ url_for('update_host_sub_route') }}" method="post" class="form-inline" style="margin: 8px 0;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
 					<input type="hidden" name="host_name" value="{{ host.host_name }}" />
 					<label class="form-check-label" style="margin-right:8px;">
 						<input type="checkbox" name="is_sub_host" value="1" {% if host.is_sub_host %}checked{% endif %} />
-						САБ
+						Основная Remna
 					</label>
-					<button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить САБ</button>
+					<button type="submit" class="btn btn-outline-secondary btn-sm pill" style="margin-left:6px;">Сохранить</button>
 				</form>
                 <!-- SSH настройки для speedtest на удалённом хосте -->
                 <div class="card glass" style="margin: 8px 0;">
@@ -353,7 +348,7 @@
 						</div>
 						{% endfor %}
 					{% else %}
-						<p>Хосты еще не добавлены.</p>
+						<p>Remna-записи ещё не добавлены.</p>
 					{% endif %}
 				</div>
 			</div>
