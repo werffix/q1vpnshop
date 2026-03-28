@@ -89,8 +89,6 @@ def initialize_db():
                     host_username TEXT NOT NULL,
                     host_pass TEXT NOT NULL,
                     host_inbound_id INTEGER NOT NULL,
-                    remna_api_token TEXT,
-                    remna_caddy_api_key TEXT,
                     host_order INTEGER,
                     is_expired_host INTEGER NOT NULL DEFAULT 0,
                     is_sub_host INTEGER NOT NULL DEFAULT 0,
@@ -820,12 +818,6 @@ def run_migration():
                 logging.info(" -> Столбец 'subscription_url' успешно добавлен в 'xui_hosts'.")
             else:
                 logging.info(" -> Столбец 'subscription_url' уже существует в 'xui_hosts'.")
-            if 'remna_api_token' not in xh_columns:
-                cursor.execute("ALTER TABLE xui_hosts ADD COLUMN remna_api_token TEXT")
-                logging.info(" -> Столбец 'remna_api_token' успешно добавлен в 'xui_hosts'.")
-            if 'remna_caddy_api_key' not in xh_columns:
-                cursor.execute("ALTER TABLE xui_hosts ADD COLUMN remna_caddy_api_key TEXT")
-                logging.info(" -> Столбец 'remna_caddy_api_key' успешно добавлен в 'xui_hosts'.")
             if 'host_order' not in xh_columns:
                 cursor.execute("ALTER TABLE xui_hosts ADD COLUMN host_order INTEGER")
                 logging.info(" -> Столбец 'host_order' успешно добавлен в 'xui_hosts'.")
@@ -1090,15 +1082,13 @@ def create_new_transactions_table(cursor: sqlite3.Cursor):
 def create_host(
     name: str,
     url: str,
-    user: str = "",
-    passwd: str = "",
-    inbound: int = 0,
+    user: str,
+    passwd: str,
+    inbound: int,
     subscription_url: str | None = None,
     client_monthly_traffic_gb: float | None = None,
     is_expired_host: bool | int = False,
     is_sub_host: bool | int = False,
-    remna_api_token: str | None = None,
-    remna_caddy_api_key: str | None = None,
 ):
     try:
         name = normalize_host_name(name)
@@ -1108,10 +1098,8 @@ def create_host(
         try:
             inbound = int(inbound)
         except Exception:
-            inbound = 0
+            pass
         subscription_url = (subscription_url or None)
-        remna_api_token = (remna_api_token or "").strip() or None
-        remna_caddy_api_key = (remna_caddy_api_key or "").strip() or None
         try:
             client_monthly_traffic_gb = float(client_monthly_traffic_gb) if client_monthly_traffic_gb not in (None, "", "null") else None
         except Exception:
@@ -1127,18 +1115,8 @@ def create_host(
                 cursor.execute("UPDATE xui_hosts SET is_sub_host = 0")
             try:
                 cursor.execute(
-                    """
-                    INSERT INTO xui_hosts (
-                        host_name, host_url, host_username, host_pass, host_inbound_id,
-                        remna_api_token, remna_caddy_api_key,
-                        host_order, is_expired_host, subscription_url, client_monthly_traffic_gb, is_sub_host
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        name, url, user, passwd, inbound,
-                        remna_api_token, remna_caddy_api_key,
-                        next_order, is_expired_host, subscription_url, client_monthly_traffic_gb, is_sub_host,
-                    )
+                    "INSERT INTO xui_hosts (host_name, host_url, host_username, host_pass, host_inbound_id, host_order, is_expired_host, subscription_url, client_monthly_traffic_gb, is_sub_host) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (name, url, user, passwd, inbound, next_order, is_expired_host, subscription_url, client_monthly_traffic_gb, is_sub_host)
                 )
             except sqlite3.OperationalОшибка:
                 cursor.execute(
@@ -1169,46 +1147,6 @@ def update_host_subscription_url(host_name: str, subscription_url: str | None) -
             return True
     except sqlite3.Error as e:
         logging.error(f"Не удалось обновить subscription_url для хоста '{host_name}': {e}")
-        return False
-
-def update_host_remna_api_token(host_name: str, remna_api_token: str | None) -> bool:
-    try:
-        host_name = normalize_host_name(host_name)
-        token = (remna_api_token or "").strip() or None
-        with sqlite3.connect(DB_FILE) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name,))
-            if cursor.fetchone() is None:
-                logging.warning(f"update_host_remna_api_token: хост '{host_name}' не найден")
-                return False
-            cursor.execute(
-                "UPDATE xui_hosts SET remna_api_token = ? WHERE TRIM(host_name) = TRIM(?)",
-                (token, host_name)
-            )
-            conn.commit()
-            return True
-    except sqlite3.Error as e:
-        logging.error(f"Не удалось обновить remna_api_token для хоста '{host_name}': {e}")
-        return False
-
-def update_host_remna_caddy_api_key(host_name: str, remna_caddy_api_key: str | None) -> bool:
-    try:
-        host_name = normalize_host_name(host_name)
-        token = (remna_caddy_api_key or "").strip() or None
-        with sqlite3.connect(DB_FILE) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1 FROM xui_hosts WHERE TRIM(host_name) = TRIM(?)", (host_name,))
-            if cursor.fetchone() is None:
-                logging.warning(f"update_host_remna_caddy_api_key: хост '{host_name}' не найден")
-                return False
-            cursor.execute(
-                "UPDATE xui_hosts SET remna_caddy_api_key = ? WHERE TRIM(host_name) = TRIM(?)",
-                (token, host_name)
-            )
-            conn.commit()
-            return True
-    except sqlite3.Error as e:
-        logging.error(f"Не удалось обновить remna_caddy_api_key для хоста '{host_name}': {e}")
         return False
 
 def update_host_client_monthly_traffic_limit(host_name: str, traffic_gb: float | None) -> bool:

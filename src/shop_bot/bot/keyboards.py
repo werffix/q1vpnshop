@@ -191,8 +191,7 @@ def create_main_menu_keyboard(
     user_keys: list,
     trial_available: bool,
     is_admin: bool,
-    has_active_subscription: bool = False,
-    connect_url: str | None = None,
+    has_active_subscription: bool = False
 ) -> InlineKeyboardMarkup:
     # Prepare filters and replacements for main menu
     def _filter(cfg: dict) -> bool:
@@ -220,10 +219,7 @@ def create_main_menu_keyboard(
             return kb
         # Replace buy button with connect button for active subscriptions.
         builder = InlineKeyboardBuilder()
-        if connect_url:
-            builder.row(InlineKeyboardButton(text="🔌 Подключиться", url=connect_url))
-        else:
-            builder.row(InlineKeyboardButton(text="🔌 Подключиться", callback_data="show_connect_menu"))
+        builder.row(InlineKeyboardButton(text="🔌 Подключиться", callback_data="show_connect_menu"))
         for row in kb.inline_keyboard:
             filtered = [
                 btn for btn in row
@@ -353,10 +349,7 @@ def create_main_menu_keyboard(
 
             if has_active_subscription:
                 out = InlineKeyboardBuilder()
-                if connect_url:
-                    out.row(InlineKeyboardButton(text="🔌 Подключиться", url=connect_url))
-                else:
-                    out.row(InlineKeyboardButton(text="🔌 Подключиться", callback_data="show_connect_menu"))
+                out.row(InlineKeyboardButton(text="🔌 Подключиться", callback_data="show_connect_menu"))
                 for row in builder.as_markup().inline_keyboard:
                     filtered = [
                         btn for btn in row
@@ -372,10 +365,7 @@ def create_main_menu_keyboard(
     # Fallback to original hardcoded logic
     logger.info("Using fallback hardcoded button logic")
     if has_active_subscription:
-        if connect_url:
-            builder.button(text="🔌 Подключиться", url=connect_url)
-        else:
-            builder.button(text="🔌 Подключиться", callback_data="show_connect_menu")
+        builder.button(text="🔌 Подключиться", callback_data="show_connect_menu")
     if trial_available and get_setting("trial_enabled") == "true":
         builder.button(text=(get_setting("btn_try") or "🎁 Попробовать бесплатно"), callback_data="get_trial")
 
@@ -984,7 +974,7 @@ def create_back_to_menu_keyboard() -> InlineKeyboardMarkup:
     builder.button(text=(get_setting("btn_back_to_menu") or "⬅️ Назад в меню"), callback_data="back_to_main_menu")
     return builder.as_markup()
 
-def create_profile_keyboard(show_renew_button: bool = True, connect_url: str | None = None) -> InlineKeyboardMarkup:
+def create_profile_keyboard(show_renew_button: bool = True) -> InlineKeyboardMarkup:
     kb = _build_keyboard_from_db('profile_menu')
     if kb:
         has_traffic_button = any(
@@ -993,13 +983,10 @@ def create_profile_keyboard(show_renew_button: bool = True, connect_url: str | N
         )
         # Remove legacy "Моя ссылка подписки" button from profile menu.
         builder = InlineKeyboardBuilder()
-        if show_renew_button and connect_url:
-            builder.button(text="🔌 Подключиться", url=connect_url)
-        else:
-            builder.button(
-                text=("🔌 Подключиться" if show_renew_button else "💳 Купить подписку"),
-                callback_data=("show_connect_menu" if show_renew_button else "buy_new_key")
-            )
+        builder.button(
+            text=("🔌 Подключиться" if show_renew_button else "💳 Купить подписку"),
+            callback_data=("show_connect_menu" if show_renew_button else "buy_new_key")
+        )
         if show_renew_button:
             builder.button(text="⚙️ Управление подпиской", callback_data="manage_subscription")
         for row in kb.inline_keyboard:
@@ -1020,10 +1007,7 @@ def create_profile_keyboard(show_renew_button: bool = True, connect_url: str | N
 
     builder = InlineKeyboardBuilder()
     if show_renew_button:
-        if connect_url:
-            builder.button(text="🔌 Подключиться", url=connect_url)
-        else:
-            builder.button(text="🔌 Подключиться", callback_data="show_connect_menu")
+        builder.button(text="🔌 Подключиться", callback_data="show_connect_menu")
         builder.button(text="⚙️ Управление подпиской", callback_data="manage_subscription")
     else:
         builder.button(text="💳 Купить подписку", callback_data="buy_new_key")
@@ -1082,16 +1066,6 @@ def create_connect_devices_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="🐧 Linux", callback_data="howto_linux")
     builder.button(text=(get_setting("btn_back_to_menu") or "⬅️ Назад в меню"), callback_data="back_to_main_menu")
     builder.adjust(2, 2, 1)
-    return builder.as_markup()
-
-
-def create_direct_connect_keyboard(subscription_url: str | None) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    if subscription_url:
-        builder.button(text="🔗 Открыть подписку", url=subscription_url)
-        builder.button(text="📋 Скопировать ссылку", callback_data="copy_subscription_link")
-    builder.button(text="⬅️ Назад в меню", callback_data="back_to_main_menu")
-    builder.adjust(1)
     return builder.as_markup()
 
 def create_referral_keyboard(referral_link: str) -> InlineKeyboardMarkup:
