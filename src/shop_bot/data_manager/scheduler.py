@@ -212,6 +212,77 @@ async def sync_keys_with_panels():
         is_expired_host = int(host.get("is_expired_host") or 0) == 1
         logger.debug(f"Scheduler: Обрабатываю хост: '{host_name}'")
 
+        if (host.get("remna_api_token") or "").strip():
+            try:
+                keys_in_db = database.get_keys_for_host(host_name) or []
+                now = datetime.now()
+
+                if is_expired_host:
+                    for user in (database.get_all_users() or []):
+                        user_id = user.get("telegram_id")
+                        if not user_id:
+                            continue
+                        email = _subscription_email_for_user_host(int(user_id), host_name)
+                        try:
+                            await xui_api.delete_client_on_host(host_name, email)
+                        except Exception:
+                            pass
+                    continue
+
+                for db_key in keys_in_db:
+                    key_email = db_key.get("key_email")
+                    if not key_email:
+                        continue
+                    expiry_raw = db_key.get("expiry_date")
+                    if not expiry_raw:
+                        continue
+                    try:
+                        expiry_dt = datetime.fromisoformat(str(expiry_raw))
+                    except Exception:
+                        continue
+
+                    if expiry_dt <= now:
+                        try:
+                            await xui_api.delete_client_on_host(host_name, key_email)
+                        except Exception:
+                            pass
+                        try:
+                            key_id = db_key.get("key_id")
+                            if key_id:
+                                database.delete_key_by_id(int(key_id))
+                                total_affected_records += 1
+                        except Exception as e:
+                            logger.warning(f"Scheduler: Не удалось удалить истекший Remna-ключ key_id={db_key.get('key_id')}: {e}")
+                        continue
+
+                    try:
+                        repaired = await xui_api.create_or_update_key_on_host(
+                            host_name=host_name,
+                            email=key_email,
+                            days_to_add=None,
+                            expiry_timestamp_ms=int(expiry_dt.timestamp() * 1000),
+                        )
+                        if repaired and repaired.get("expiry_timestamp_ms"):
+                            database.update_key_info(
+                                int(db_key.get("key_id")),
+                                repaired.get("client_uuid") or db_key.get("xui_client_uuid") or "",
+                                int(repaired.get("expiry_timestamp_ms")),
+                            )
+                            total_affected_records += 1
+                    except Exception as e:
+                        logger.warning(
+                            f"Scheduler: Не удалось синхронизировать Remna-пользователя '{key_email}' "
+                            f"на '{host_name}': {e}"
+                        )
+
+                    try:
+                        await xui_api.set_client_enabled_on_host(host_name, key_email, enabled=True)
+                    except Exception as e:
+                        logger.warning(f"Scheduler: Не удалось включить Remna-подписку '{key_email}' на '{host_name}': {e}")
+            except Exception as e:
+                logger.error(f"Scheduler: Ошибка синхронизации Remna для '{host_name}': {e}", exc_info=True)
+            continue
+
         if is_expired_host:
             try:
                 all_users = database.get_all_users() or []

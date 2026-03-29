@@ -46,6 +46,8 @@ from shop_bot.data_manager.database import (
     add_new_key, get_balance, adjust_user_balance, get_referrals_for_user,
     get_user, get_key_by_email, get_host, get_or_create_user_subscription_uuid, reset_user_state,
     move_host_order, update_host_is_expired, update_host_is_sub, get_user_device_limit, adjust_user_device_limit,
+    update_host_remna_api_token, update_host_remna_caddy_api_key, update_host_remna_cookie,
+    update_host_remna_cf_access,
     get_all_traffic_packages, create_traffic_package, update_traffic_package, delete_traffic_package,
 )
 
@@ -2307,10 +2309,62 @@ def create_webhook_app(bot_controller_instance):
         host_name = (request.form.get('host_name') or '').strip()
         new_url = (request.form.get('host_url') or '').strip()
         if not host_name or not new_url:
-            flash('Укажите имя хоста и новый URL.', 'warning')
+            flash('Укажите имя записи Remna и новый URL.', 'warning')
             return redirect(url_for('settings_page', tab='hosts'))
         ok = update_host_url(host_name, new_url)
-        flash('URL хоста обновлён.' if ok else 'Не удалось обновить URL хоста.', 'success' if ok else 'danger')
+        flash('URL Remnawave обновлён.' if ok else 'Не удалось обновить URL Remnawave.', 'success' if ok else 'danger')
+        return redirect(url_for('settings_page', tab='hosts'))
+
+    @flask_app.route('/update-host-remna-api-token', methods=['POST'])
+    @login_required
+    def update_host_remna_api_token_route():
+        host_name = (request.form.get('host_name') or '').strip()
+        token = (request.form.get('remna_api_token') or '').strip()
+        if not host_name:
+            flash('Не указана запись Remna.', 'warning')
+            return redirect(url_for('settings_page', tab='hosts'))
+        ok = update_host_remna_api_token(host_name, token or None)
+        flash('API token Remna обновлён.' if ok else 'Не удалось обновить API token Remna.', 'success' if ok else 'danger')
+        return redirect(url_for('settings_page', tab='hosts'))
+
+    @flask_app.route('/update-host-remna-caddy-api-key', methods=['POST'])
+    @login_required
+    def update_host_remna_caddy_api_key_route():
+        host_name = (request.form.get('host_name') or '').strip()
+        token = (request.form.get('remna_caddy_api_key') or '').strip()
+        if not host_name:
+            flash('Не указана запись Remna.', 'warning')
+            return redirect(url_for('settings_page', tab='hosts'))
+        ok = update_host_remna_caddy_api_key(host_name, token or None)
+        flash('Caddy/X-Api-Key обновлён.' if ok else 'Не удалось обновить Caddy/X-Api-Key.', 'success' if ok else 'danger')
+        return redirect(url_for('settings_page', tab='hosts'))
+
+    @flask_app.route('/update-host-remna-cookie', methods=['POST'])
+    @login_required
+    def update_host_remna_cookie_route():
+        host_name = (request.form.get('host_name') or '').strip()
+        cookie = (request.form.get('remna_cookie') or '').strip()
+        if not host_name:
+            flash('Не указана запись Remna.', 'warning')
+            return redirect(url_for('settings_page', tab='hosts'))
+        ok = update_host_remna_cookie(host_name, cookie or None)
+        flash('Cookie обновлён.' if ok else 'Не удалось обновить Cookie.', 'success' if ok else 'danger')
+        return redirect(url_for('settings_page', tab='hosts'))
+
+    @flask_app.route('/update-host-remna-cf-access', methods=['POST'])
+    @login_required
+    def update_host_remna_cf_access_route():
+        host_name = (request.form.get('host_name') or '').strip()
+        client_id = (request.form.get('remna_cf_client_id') or '').strip()
+        client_secret = (request.form.get('remna_cf_client_secret') or '').strip()
+        if not host_name:
+            flash('Не указана запись Remna.', 'warning')
+            return redirect(url_for('settings_page', tab='hosts'))
+        ok = update_host_remna_cf_access(host_name, client_id or None, client_secret or None)
+        flash(
+            'Cloudflare Access обновлён.' if ok else 'Не удалось обновить Cloudflare Access.',
+            'success' if ok else 'danger'
+        )
         return redirect(url_for('settings_page', tab='hosts'))
 
     @flask_app.route('/update-host-traffic', methods=['POST'])
@@ -2613,13 +2667,18 @@ def create_webhook_app(bot_controller_instance):
         create_host(
             name=host_name,
             url=request.form['host_url'],
-            user=request.form['host_username'],
-            passwd=request.form['host_pass'],
-            inbound=int(request.form['host_inbound_id']),
+            user="",
+            passwd="",
+            inbound=0,
             subscription_url=(request.form.get('host_subscription_url') or '').strip() or None,
             client_monthly_traffic_gb=(request.form.get('client_monthly_traffic_gb') or '').strip() or None,
             is_expired_host=is_expired_host,
             is_sub_host=is_sub_host,
+            remna_api_token=(request.form.get('remna_api_token') or '').strip() or None,
+            remna_caddy_api_key=(request.form.get('remna_caddy_api_key') or '').strip() or None,
+            remna_cookie=(request.form.get('remna_cookie') or '').strip() or None,
+            remna_cf_client_id=(request.form.get('remna_cf_client_id') or '').strip() or None,
+            remna_cf_client_secret=(request.form.get('remna_cf_client_secret') or '').strip() or None,
         )
 
         migrated_users = 0
